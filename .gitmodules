@@ -1,0 +1,3 @@
+[submodule "src/src/ants_seg_to_nidm"]
+	path = src/src/ants_seg_to_nidm
+	url = git@github.com:ReproNim/ants_seg_to_nidm.git
