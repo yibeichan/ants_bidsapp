@@ -113,7 +113,7 @@ class ANTsSegmentation:
         
         return brain_image
     
-    def segment_image(self, image, priors=None):
+    def segment_image(self, image, priors=None, prior_weight=0.25, mrf=0.2, iterations=10):
         """
         Perform ANTs segmentation on the given image.
         
@@ -123,6 +123,12 @@ class ANTsSegmentation:
             Preprocessed image to segment
         priors : list, optional
             List of prior probability maps
+        prior_weight : float, optional
+            Weight for priors (0=initialization only, 0.25-0.5=regularization)
+        mrf : float, optional
+            MRF smoothing parameter (higher=smoother)
+        iterations : int, optional
+            Maximum number of iterations
             
         Returns:
         --------
@@ -131,21 +137,25 @@ class ANTsSegmentation:
         """
         self.logger.info("Starting image segmentation")
         
+        # Get mask for segmentation
+        mask = ants.get_mask(image)
+        
         # Use Atropos segmentation
         if priors:
             self.logger.debug("Using provided prior probability maps")
             segmentation = ants.atropos(a=image, 
-                                        m='[0.2,1x1x1]',
-                                        c='[2,0]',
+                                        m=f'[{mrf},1x1x1]',
+                                        c=f'[{iterations},0]',
                                         i=priors,
-                                        x=ants.get_mask(image))
+                                        x=mask,
+                                        priorweight=prior_weight)
         else:
             self.logger.debug("Using kmeans initialization for segmentation")
             segmentation = ants.atropos(a=image, 
-                                        m='[0.2,1x1x1]',
-                                        c='[3,0]',
+                                        m=f'[{mrf},1x1x1]',
+                                        c=f'[{iterations},0]',
                                         i='Kmeans[3]',
-                                        x=ants.get_mask(image))
+                                        x=mask)
         
         return segmentation
     
@@ -176,6 +186,11 @@ class ANTsSegmentation:
         if not os.path.exists(anat_dir):
             os.makedirs(anat_dir)
         
+        # Create stats directory
+        stats_dir = os.path.join(subj_dir, "stats")
+        if not os.path.exists(stats_dir):
+            os.makedirs(stats_dir)
+        
         # Save labeled image
         self.logger.info(f"Saving segmentation results to {anat_dir}")
         
@@ -195,7 +210,7 @@ class ANTsSegmentation:
             # Create binary mask using threshold
             binary_mask = (prob.numpy() > self.prob_threshold).astype(np.uint8)
             binary_img = ants.from_numpy(binary_mask, origin=prob.origin, 
-                                         spacing=prob.spacing, direction=prob.direction)
+                                        spacing=prob.spacing, direction=prob.direction)
             
             if session_id:
                 mask_filename = f"sub-{subject_id}_ses-{session_id}_space-orig_{tissue_type}_mask.nii.gz"
@@ -214,8 +229,49 @@ class ANTsSegmentation:
         label_path = os.path.join(anat_dir, label_filename)
         ants.image_write(segmentation['segmentation'], label_path)
         
+        # Generate statistics files for NIDM conversion
+        # 1. antslabelstats.csv - Label statistics
+        labelstats_file = os.path.join(stats_dir, "antslabelstats.csv")
+        with open(labelstats_file, 'w') as f:
+            f.write("Label,Volume\n")  # Header for label stats
+            
+            # Extract labeled data and calculate volumes
+            labels = segmentation['segmentation'].numpy()
+            unique_labels = np.unique(labels)
+            voxel_volume = np.prod(segmentation['segmentation'].spacing)
+            
+            for label in unique_labels:
+                if label > 0:  # Skip background
+                    volume = np.sum(labels == label) * voxel_volume
+                    f.write(f"{int(label)},{volume:.2f}\n")
+        
+        # 2. antsbrainvols.csv - Brain volumes
+        brainvols_file = os.path.join(stats_dir, "antsbrainvols.csv")
+        with open(brainvols_file, 'w') as f:
+            f.write("Name,Value\n")  # Header for brain volumes
+            
+            # Calculate total brain volume (all non-zero voxels)
+            brain_mask = (labels > 0)
+            brain_volume = np.sum(brain_mask) * voxel_volume
+            
+            # Calculate tissue volumes based on probability maps
+            # Assuming first probability map is CSF, second is GM, third is WM
+            # This might need adjustment based on your specific segmentation
+            if len(segmentation['probabilityimages']) >= 3:
+                csf_volume = np.sum(segmentation['probabilityimages'][0].numpy() > self.prob_threshold) * voxel_volume
+                gm_volume = np.sum(segmentation['probabilityimages'][1].numpy() > self.prob_threshold) * voxel_volume
+                wm_volume = np.sum(segmentation['probabilityimages'][2].numpy() > self.prob_threshold) * voxel_volume
+                
+                f.write(f"BVOL,{brain_volume:.2f}\n")
+                f.write(f"CSFVOL,{csf_volume:.2f}\n")
+                f.write(f"GMVOL,{gm_volume:.2f}\n")
+                f.write(f"WMVOL,{wm_volume:.2f}\n")
+            else:
+                # If we don't have enough probability maps, just write brain volume
+                f.write(f"BVOL,{brain_volume:.2f}\n")
+        
         self.logger.info("Segmentation results saved successfully")
-    
+        
     def run_subject(self, subject_id, session_id=None):
         """
         Run the full segmentation pipeline for a subject.
