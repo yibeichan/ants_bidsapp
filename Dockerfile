@@ -15,9 +15,13 @@ RUN apt update && \
         && apt clean && \
         rm -rf /var/lib/apt/lists/*
 
-# Create symbolic links for python3.10
-RUN ln -s /usr/bin/python3.10 /usr/bin/python3 && \
-    ln -s /usr/bin/python3.10 /usr/bin/python
+# Create symbolic links for python3.10 if they don't exist
+RUN if [ ! -L /usr/bin/python3 ]; then \
+        ln -s /usr/bin/python3.10 /usr/bin/python3; \
+    fi && \
+    if [ ! -L /usr/bin/python ]; then \
+        ln -s /usr/bin/python3.10 /usr/bin/python; \
+    fi
 
 # Upgrade pip and install basic Python tools
 RUN python -m pip install --upgrade pip setuptools wheel

@@ -16,9 +16,14 @@ From: ubuntu:22.04
         && apt clean && \
         rm -rf /var/lib/apt/lists/*
 
-    # Create symbolic links for python3.10
-    ln -s /usr/bin/python3.10 /usr/bin/python3
-    ln -s /usr/bin/python3.10 /usr/bin/python
+    # Create symbolic links for python3.10 if they don't exist
+    if [ ! -L /usr/bin/python3 ]; then
+        ln -s /usr/bin/python3.10 /usr/bin/python3
+    fi
+    
+    if [ ! -L /usr/bin/python ]; then
+        ln -s /usr/bin/python3.10 /usr/bin/python
+    fi
 
     # Upgrade pip and install basic Python tools
     python3 -m pip install --upgrade pip setuptools wheel
