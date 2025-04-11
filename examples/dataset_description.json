@@ -1,0 +1,18 @@
+{
+    "Name": "Example BIDS Dataset",
+    "BIDSVersion": "1.7.0",
+    "DatasetType": "raw",
+    "License": "CC0",
+    "Authors": [
+        "Example Author"
+    ],
+    "Acknowledgements": "Example acknowledgements",
+    "HowToAcknowledge": "Please cite this dataset if you use it in your research.",
+    "Funding": [
+        "Example funding source"
+    ],
+    "ReferencesAndLinks": [
+        "https://example.com"
+    ],
+    "DatasetDOI": "10.1234/example.doi"
+} 
