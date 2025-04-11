@@ -5,8 +5,8 @@ From: ubuntu:22.04
     # Update and install basic system dependencies
     apt update && \
     apt install -y \
-        python3.12 \
-        python3.12-dev \
+        python3.10 \
+        python3.10-dev \
         python3-pip \
         build-essential \
         cmake \
@@ -16,9 +16,9 @@ From: ubuntu:22.04
         && apt clean && \
         rm -rf /var/lib/apt/lists/*
 
-    # Create symbolic links for python3.12
-    ln -s /usr/bin/python3.12 /usr/bin/python3
-    ln -s /usr/bin/python3.12 /usr/bin/python
+    # Create symbolic links for python3.10
+    ln -s /usr/bin/python3.10 /usr/bin/python3
+    ln -s /usr/bin/python3.10 /usr/bin/python
 
     # Upgrade pip and install basic Python tools
     python3 -m pip install --upgrade pip setuptools wheel
@@ -56,7 +56,7 @@ From: ubuntu:22.04
 
     Version Information:
     - ANTs BIDS App: 0.1.0
-    - Python: 3.12
+    - Python: 3.10
     - Base: Ubuntu 22.04
 
     Usage:

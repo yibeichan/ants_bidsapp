@@ -4,8 +4,8 @@ FROM ubuntu:22.04
 # Install system dependencies and Python
 RUN apt update && \
     apt install -y \
-        python3.12 \
-        python3.12-dev \
+        python3.10 \
+        python3.10-dev \
         python3-pip \
         build-essential \
         cmake \
@@ -15,9 +15,9 @@ RUN apt update && \
         && apt clean && \
         rm -rf /var/lib/apt/lists/*
 
-# Create symbolic links for python3.12
-RUN ln -s /usr/bin/python3.12 /usr/bin/python3 && \
-    ln -s /usr/bin/python3.12 /usr/bin/python
+# Create symbolic links for python3.10
+RUN ln -s /usr/bin/python3.10 /usr/bin/python3 && \
+    ln -s /usr/bin/python3.10 /usr/bin/python
 
 # Upgrade pip and install basic Python tools
 RUN python -m pip install --upgrade pip setuptools wheel
