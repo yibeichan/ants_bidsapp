@@ -12,11 +12,7 @@ from datetime import datetime
 import subprocess
 
 # Import local modules
-from ants.wrapper import ANTsSegmentation
-# We'll import from the submodule
-sys.path.append(os.path.join(os.path.dirname(__file__), 'ants_seg_to_nidm'))
-from ants_seg_to_nidm.ants_seg_to_nidm import ants_seg_to_nidm
-import utils
+from src.ants.wrapper import ANTsSegmentation
 
 def setup_logger(log_dir, verbose=False):
     """Set up logging configuration."""
@@ -46,7 +42,7 @@ def create_dataset_description(output_dir, app_version):
             {
                 "Name": "ANTs BIDS App",
                 "Version": app_version,
-                "CodeURL": "https://github.com/yourusername/ants_bidsapp"
+                "CodeURL": "https://github.com/ReproNim/ants_bidsapp"
             }
         ],
         "HowToAcknowledge": "Please cite the ANTs segmentation tool and the NIDM standard in your publications."
@@ -63,7 +59,7 @@ def parse_arguments():
     parser.add_argument('bids_dir', help='The directory with the input dataset formatted according to the BIDS standard.')
     parser.add_argument('output_dir', help='The directory where the output files should be stored.')
     parser.add_argument('analysis_level', help='Level of the analysis that will be performed.',
-                        choices=['participant', 'group'])
+                        choices=['participant'])
     
     # Optional arguments
     parser.add_argument('--participant-label', help='The label(s) of the participant(s) that should be analyzed. The label corresponds to sub-<participant_label> from the BIDS spec. If this parameter is not provided, all subjects will be analyzed. Multiple participants can be specified with a space-separated list.', 
@@ -102,7 +98,6 @@ def validate_bids(bids_dir):
     if not subjects:
         raise ValueError(f"No subject directories found in {bids_dir}")
     
-    # For more comprehensive validation, consider using a BIDS validator tool
     logging.info(f"Found {len(subjects)} subjects in BIDS directory")
     return subjects
 
@@ -193,7 +188,7 @@ def run_participant_level(args, logger):
                             # Construct the command to run ants_seg_to_nidm.py
                             cmd = [
                                 "python", 
-                                os.path.join(os.path.dirname(__file__), "ants_seg_to_nidm", "ants_seg_to_nidm.py"),
+                                os.path.join(os.path.dirname(__file__), "ants_seg_to_nidm", "ants_seg_to_nidm", "ants_seg_to_nidm.py"),
                                 "-f", f"{label_stats},{brain_vols},{seg_path}",
                                 "-subjid", subject_id,
                                 "-o", nidm_file
@@ -216,7 +211,6 @@ def run_participant_level(args, logger):
                 success_count += 1
                 
                 # Convert segmentation to NIDM if requested
-                # For the case without sessions
                 if not args.skip_nidm:
                     try:
                         logger.info(f"Converting segmentation to NIDM for subject {subject_id}")
@@ -242,7 +236,7 @@ def run_participant_level(args, logger):
                         # Construct the command to run ants_seg_to_nidm.py
                         cmd = [
                             "python", 
-                            os.path.join(os.path.dirname(__file__), "ants_seg_to_nidm", "ants_seg_to_nidm.py"),
+                            os.path.join(os.path.dirname(__file__), "ants_seg_to_nidm", "ants_seg_to_nidm", "ants_seg_to_nidm.py"),
                             "-f", f"{label_stats},{brain_vols},{seg_path}",
                             "-subjid", subject_id,
                             "-o", nidm_file
@@ -268,19 +262,6 @@ def run_participant_level(args, logger):
     
     return 0
 
-def run_group_level(args, logger):
-    """Run the group level analysis."""
-    logger.info("Starting group level analysis")
-    
-    # This is a placeholder for group level analysis
-    # In a real implementation, you might want to:
-    # 1. Collect all segmentation results
-    # 2. Create group-level statistics
-    # 3. Generate group-level visualizations
-    
-    logger.info("Group level analysis is not implemented yet.")
-    return 0
-
 def main():
     """Main function to coordinate the workflow."""
     args = parse_arguments()
@@ -298,16 +279,10 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     try:
-        # Run the appropriate analysis level
-        if args.analysis_level == 'participant':
-            return run_participant_level(args, logger)
-        elif args.analysis_level == 'group':
-            return run_group_level(args, logger)
-        else:
-            logger.error(f"Unknown analysis level: {args.analysis_level}")
-            return 1
+        # Run participant level analysis
+        return run_participant_level(args, logger)
     except Exception as e:
-        logger.error(f"Error in {args.analysis_level} level analysis: {str(e)}")
+        logger.error(f"Error in participant level analysis: {str(e)}")
         return 1
 
 if __name__ == "__main__":

@@ -161,7 +161,7 @@ class ANTsSegmentation:
     
     def save_results(self, segmentation, subject_id, session_id=None, output_dir=None):
         """
-        Save segmentation results in BIDS-compatible format.
+        Save segmentation results in BIDS-compatible format and generate files for NIDM conversion.
         
         Parameters:
         -----------
@@ -186,7 +186,7 @@ class ANTsSegmentation:
         if not os.path.exists(anat_dir):
             os.makedirs(anat_dir)
         
-        # Create stats directory
+        # Create stats directory for NIDM conversion
         stats_dir = os.path.join(subj_dir, "stats")
         if not os.path.exists(stats_dir):
             os.makedirs(stats_dir)
@@ -194,7 +194,10 @@ class ANTsSegmentation:
         # Save labeled image
         self.logger.info(f"Saving segmentation results to {anat_dir}")
         
-        # Save probability maps
+        # Save probability maps and create binary masks
+        tissue_volumes = {}  # Store volumes for brainvols.csv
+        label_volumes = {}   # Store volumes for labelstats.csv
+        
         for idx, prob in enumerate(segmentation['probabilityimages']):
             tissue_type = f"tissue{idx+1}"
             
@@ -219,6 +222,10 @@ class ANTsSegmentation:
             
             mask_path = os.path.join(anat_dir, mask_filename)
             ants.image_write(binary_img, mask_path)
+            
+            # Calculate tissue volume
+            voxel_volume = np.prod(prob.spacing)
+            tissue_volumes[tissue_type] = np.sum(binary_mask) * voxel_volume
         
         # Save labeled image
         if session_id:
@@ -229,8 +236,7 @@ class ANTsSegmentation:
         label_path = os.path.join(anat_dir, label_filename)
         ants.image_write(segmentation['segmentation'], label_path)
         
-        # Generate statistics files for NIDM conversion
-        # 1. antslabelstats.csv - Label statistics
+        # Generate antslabelstats.csv
         labelstats_file = os.path.join(stats_dir, "antslabelstats.csv")
         with open(labelstats_file, 'w') as f:
             f.write("Label,Volume\n")  # Header for label stats
@@ -243,9 +249,10 @@ class ANTsSegmentation:
             for label in unique_labels:
                 if label > 0:  # Skip background
                     volume = np.sum(labels == label) * voxel_volume
+                    label_volumes[int(label)] = volume
                     f.write(f"{int(label)},{volume:.2f}\n")
         
-        # 2. antsbrainvols.csv - Brain volumes
+        # Generate antsbrainvols.csv
         brainvols_file = os.path.join(stats_dir, "antsbrainvols.csv")
         with open(brainvols_file, 'w') as f:
             f.write("Name,Value\n")  # Header for brain volumes
@@ -254,21 +261,14 @@ class ANTsSegmentation:
             brain_mask = (labels > 0)
             brain_volume = np.sum(brain_mask) * voxel_volume
             
-            # Calculate tissue volumes based on probability maps
-            # Assuming first probability map is CSF, second is GM, third is WM
-            # This might need adjustment based on your specific segmentation
-            if len(segmentation['probabilityimages']) >= 3:
-                csf_volume = np.sum(segmentation['probabilityimages'][0].numpy() > self.prob_threshold) * voxel_volume
-                gm_volume = np.sum(segmentation['probabilityimages'][1].numpy() > self.prob_threshold) * voxel_volume
-                wm_volume = np.sum(segmentation['probabilityimages'][2].numpy() > self.prob_threshold) * voxel_volume
-                
-                f.write(f"BVOL,{brain_volume:.2f}\n")
-                f.write(f"CSFVOL,{csf_volume:.2f}\n")
-                f.write(f"GMVOL,{gm_volume:.2f}\n")
-                f.write(f"WMVOL,{wm_volume:.2f}\n")
-            else:
-                # If we don't have enough probability maps, just write brain volume
-                f.write(f"BVOL,{brain_volume:.2f}\n")
+            # Write brain volumes
+            f.write(f"BVOL,{brain_volume:.2f}\n")
+            
+            # Write tissue volumes (assuming order: CSF, GM, WM)
+            if len(tissue_volumes) >= 3:
+                f.write(f"CSFVOL,{tissue_volumes['tissue1']:.2f}\n")
+                f.write(f"GMVOL,{tissue_volumes['tissue2']:.2f}\n")
+                f.write(f"WMVOL,{tissue_volumes['tissue3']:.2f}\n")
         
         self.logger.info("Segmentation results saved successfully")
         
