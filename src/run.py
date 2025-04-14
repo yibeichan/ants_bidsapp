@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 from datetime import datetime
 import subprocess
+from bids import BIDSLayout
 
 # Import local modules
 from src.ants.wrapper import ANTsSegmentation
@@ -59,11 +60,10 @@ def parse_arguments():
     parser.add_argument('bids_dir', help='The directory with the input dataset formatted according to the BIDS standard.')
     parser.add_argument('output_dir', help='The directory where the output files should be stored.')
     parser.add_argument('analysis_level', help='Level of the analysis that will be performed.',
-                        choices=['participant'])
+                        choices=['participant', 'session'])
     
     # Optional arguments
-    parser.add_argument('--participant-label', help='The label(s) of the participant(s) that should be analyzed. The label corresponds to sub-<participant_label> from the BIDS spec. If this parameter is not provided, all subjects will be analyzed. Multiple participants can be specified with a space-separated list.', 
-                        nargs='+')
+    parser.add_argument('--participant-label', help='The label of the participant that should be analyzed. The label corresponds to sub-<participant_label> from the BIDS spec.')
     parser.add_argument('--session-label', help='The label(s) of the session(s) that should be analyzed. The label corresponds to ses-<session_label> from the BIDS spec. If this parameter is not provided, all sessions will be analyzed. Multiple sessions can be specified with a space-separated list.',
                         nargs='+')
     parser.add_argument('--modality', help='Modality to process [default: T1w]',
@@ -72,8 +72,11 @@ def parse_arguments():
                         type=float, default=0.5)
     parser.add_argument('--priors', help='Paths to prior probability maps for segmentation',
                         nargs='+')
+    parser.add_argument('--skip-bids-validation', help='Skip BIDS validation step',
+                        action='store_true')
     parser.add_argument('--skip-nidm', help='Skip NIDM conversion step',
                         action='store_true')
+    
     parser.add_argument('--num-threads', help='Number of threads to use for processing [default: 1]',
                         type=int, default=1)
     parser.add_argument('-v', '--verbose', help='Verbose output',
@@ -83,184 +86,209 @@ def parse_arguments():
     
     return parser.parse_args()
 
-def validate_bids(bids_dir):
-    """Validate BIDS directory structure."""
-    # Basic validation - check for key directories and files
-    if not os.path.isdir(bids_dir):
-        raise ValueError(f"BIDS directory does not exist: {bids_dir}")
+def initialize(args):
+    """Initialize the ANTs BIDS app.
+    Args:
+        args: Command line arguments
+    Returns:
+        tuple: (layout, segmenter, derivatives_dir, nidm_dir, temp_dir)
+    """
+    # Initialize BIDS Layout
+    layout = BIDSLayout(args.bids_dir, validate=not args.skip_bids_validation)
     
-    # Check for dataset_description.json
-    if not os.path.exists(os.path.join(bids_dir, 'dataset_description.json')):
-        logging.warning(f"dataset_description.json not found in {bids_dir}. This may not be a valid BIDS dataset.")
-    
-    # Check for at least one subject directory
-    subjects = [d for d in os.listdir(bids_dir) if d.startswith('sub-')]
-    if not subjects:
-        raise ValueError(f"No subject directories found in {bids_dir}")
-    
-    logging.info(f"Found {len(subjects)} subjects in BIDS directory")
-    return subjects
+    # Create output directories
+    output_dir = Path(args.output_dir) / 'ants_bidsapp'
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-def run_participant_level(args, logger):
-    """Run the participant level analysis."""
-    logger.info("Starting participant level analysis")
-    
-    # Validate input directory
-    subjects = validate_bids(args.bids_dir)
-    
-    # Filter subjects if participant_label is provided
-    if args.participant_label:
-        subjects = [s for s in subjects if s.replace('sub-', '') in args.participant_label]
-        if not subjects:
-            logger.error(f"No matching subjects found for labels: {args.participant_label}")
-            return 1
-    
     # Create the output derivative directory with BIDS-compliant structure
-    derivatives_dir = os.path.join(args.output_dir, 'ants-seg')
-    os.makedirs(derivatives_dir, exist_ok=True)
+    derivatives_dir = output_dir / 'ants-seg'
+    derivatives_dir.mkdir(parents=True, exist_ok=True)
     
     # Create dataset_description.json
     create_dataset_description(derivatives_dir, '0.1.0')
     
     # Create temporary directory
-    temp_dir = os.path.join(args.output_dir, 'tmp')
-    os.makedirs(temp_dir, exist_ok=True)
+    temp_dir = output_dir / 'tmp'
+    temp_dir.mkdir(parents=True, exist_ok=True)
     
     # Initialize ANTs segmentation
     segmenter = ANTsSegmentation(
-        input_path=args.bids_dir,
-        output_path=derivatives_dir,
-        temp_path=temp_dir,
+        bids_dir=args.bids_dir,
+        output_dir=derivatives_dir,
+        temp_dir=temp_dir,
         priors=args.priors,
         modality=args.modality,
         prob_threshold=args.prob_threshold,
         num_threads=args.num_threads,
         verbose=args.verbose
     )
+
+    # Create NIDM output directory
+    nidm_dir = output_dir / 'nidm'
     
-    # Process each subject
-    success_count = 0
-    for subject in subjects:
-        subject_id = subject.replace('sub-', '')
-        logger.info(f"Processing subject: {subject_id}")
+    return layout, segmenter, derivatives_dir, nidm_dir, temp_dir
+
+def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_session=None, verbose=False):
+    """Convert ANTs segmentation outputs to NIDM format.
+    Args:
+        logger: Logger instance
+        derivatives_dir (str or Path): Path to ANTs derivatives directory
+        nidm_dir (str or Path): Path to NIDM output directory
+        bids_subject (str): Subject label (without "sub-" prefix)
+        bids_session (str): Session label (without "ses-" prefix)
+        verbose (bool): Enable verbose output
+    Returns:
+        bool: True if conversion succeeded, False otherwise
+    """
+    try:
+        # Convert paths to Path objects
+        derivatives_dir = Path(derivatives_dir)
+        nidm_dir = Path(nidm_dir)
+        nidm_dir.mkdir(parents=True, exist_ok=True)
         
-        subject_dir = os.path.join(args.bids_dir, subject)
-        sessions = [d for d in os.listdir(subject_dir) if d.startswith('ses-')]
-        
-        # Filter sessions if session_label is provided
-        if args.session_label and sessions:
-            sessions = [s for s in sessions if s.replace('ses-', '') in args.session_label]
-            if not sessions:
-                logger.warning(f"No matching sessions found for subject {subject_id}")
-                continue
-        
-        if sessions:
-            # Process each session
-            for session in sessions:
-                session_id = session.replace('ses-', '')
-                if segmenter.run_subject(subject_id, session_id):
-                    success_count += 1
-                    
-                    # Convert segmentation to NIDM if requested
-                    if not args.skip_nidm:
-                        try:
-                            logger.info(f"Converting segmentation to NIDM for subject {subject_id}, session {session_id}")
-                            nidm_dir = os.path.join(args.output_dir, 'nidm')
-                            os.makedirs(nidm_dir, exist_ok=True)
-                            
-                            # Define paths to segmentation outputs
-                            seg_path = os.path.join(
-                                derivatives_dir, 
-                                f"sub-{subject_id}", 
-                                f"ses-{session_id}", 
-                                "anat",
-                                f"sub-{subject_id}_ses-{session_id}_space-orig_dseg.nii.gz"
-                            )
-                            
-                            # Define paths to the statistics files
-                            stats_dir = os.path.join(derivatives_dir, f"sub-{subject_id}", f"ses-{session_id}", "stats")
-                            label_stats = os.path.join(stats_dir, "antslabelstats.csv")
-                            brain_vols = os.path.join(stats_dir, "antsbrainvols.csv")
-                            
-                            # Define output NIDM file path
-                            nidm_file = os.path.join(nidm_dir, f"sub-{subject_id}_ses-{session_id}_NIDM.ttl")
-                            
-                            # Construct the command to run ants_seg_to_nidm.py
-                            cmd = [
-                                "python", 
-                                os.path.join(os.path.dirname(__file__), "ants_seg_to_nidm", "ants_seg_to_nidm", "ants_seg_to_nidm.py"),
-                                "-f", f"{label_stats},{brain_vols},{seg_path}",
-                                "-subjid", subject_id,
-                                "-o", nidm_file
-                            ]
-                            
-                            logger.info(f"Running command: {' '.join(cmd)}")
-                            result = subprocess.run(cmd, capture_output=True, text=True)
-                            
-                            if result.returncode != 0:
-                                logger.error(f"Error in NIDM conversion: {result.stderr}")
-                            else:
-                                logger.info(f"NIDM conversion complete: {nidm_file}")
-                                logger.debug(f"NIDM conversion output: {result.stdout}")
-                                
-                        except Exception as e:
-                            logger.error(f"Error in NIDM conversion for subject {subject_id}, session {session_id}: {str(e)}")
+        # Define paths to segmentation outputs
+        if bids_session is None:
+            # Single session case
+            subject_dir = derivatives_dir / f"sub-{bids_subject}"
+            seg_path = subject_dir / "anat" / f"sub-{bids_subject}_space-orig_dseg.nii.gz"
+            stats_dir = subject_dir / "stats"
+            log_prefix = f"subject {bids_subject}"
         else:
-            # Process subject without sessions
-            if segmenter.run_subject(subject_id):
-                success_count += 1
-                
-                # Convert segmentation to NIDM if requested
-                if not args.skip_nidm:
-                    try:
-                        logger.info(f"Converting segmentation to NIDM for subject {subject_id}")
-                        nidm_dir = os.path.join(args.output_dir, 'nidm')
-                        os.makedirs(nidm_dir, exist_ok=True)
-                        
-                        # Define paths to segmentation outputs
-                        seg_path = os.path.join(
-                            derivatives_dir, 
-                            f"sub-{subject_id}", 
-                            "anat",
-                            f"sub-{subject_id}_space-orig_dseg.nii.gz"
-                        )
-                        
-                        # Define paths to the statistics files
-                        stats_dir = os.path.join(derivatives_dir, f"sub-{subject_id}", "stats")
-                        label_stats = os.path.join(stats_dir, "antslabelstats.csv")
-                        brain_vols = os.path.join(stats_dir, "antsbrainvols.csv")
-                        
-                        # Define output NIDM file path
-                        nidm_file = os.path.join(nidm_dir, f"sub-{subject_id}_NIDM.ttl")
-                        
-                        # Construct the command to run ants_seg_to_nidm.py
-                        cmd = [
-                            "python", 
-                            os.path.join(os.path.dirname(__file__), "ants_seg_to_nidm", "ants_seg_to_nidm", "ants_seg_to_nidm.py"),
-                            "-f", f"{label_stats},{brain_vols},{seg_path}",
-                            "-subjid", subject_id,
-                            "-o", nidm_file
-                        ]
-                        
-                        logger.info(f"Running command: {' '.join(cmd)}")
-                        result = subprocess.run(cmd, capture_output=True, text=True)
-                        
-                        if result.returncode != 0:
-                            logger.error(f"Error in NIDM conversion: {result.stderr}")
-                        else:
-                            logger.info(f"NIDM conversion complete: {nidm_file}")
-                            logger.debug(f"NIDM conversion output: {result.stdout}")
-                            
-                    except Exception as e:
-                        logger.error(f"Error in NIDM conversion for subject {subject_id}: {str(e)}")
+            # Multi-session case
+            subject_dir = derivatives_dir / f"sub-{bids_subject}" / f"ses-{bids_session}"
+            seg_path = subject_dir / "anat" / f"sub-{bids_subject}_ses-{bids_session}_space-orig_dseg.nii.gz"
+            stats_dir = subject_dir / "stats"
+            log_prefix = f"subject {bids_subject}, session {bids_session}"
+        
+        # Define paths to the statistics files
+        label_stats = stats_dir / "antslabelstats.csv"
+        brain_vols = stats_dir / "antsbrainvols.csv"
+        
+        # Check if required files exist
+        required_files = [seg_path, label_stats, brain_vols]
+        for file_path in required_files:
+            if not file_path.exists():
+                logger.error(f"Required file not found: {file_path}")
+                return False
+        
+        # Construct the command to run ants_seg_to_nidm.py
+        cmd = [
+            "python", 
+            str(Path(__file__).parent / "ants_seg_to_nidm" / "ants_seg_to_nidm" / "ants_seg_to_nidm.py"),
+            "-f", f"{label_stats},{brain_vols},{seg_path}",
+            "-subjid", f"sub-{bids_subject}",
+            "-o", str(nidm_dir),
+            "-j"  # Output in JSON-LD format
+        ]
+        
+        logger.info(f"Converting segmentation to NIDM for {log_prefix}")
+        logger.info(f"Running command: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"Error in NIDM conversion: {result.stderr}")
+            return False
+        else:
+            logger.info(f"NIDM conversion complete for {log_prefix}")
+            if verbose:
+                logger.debug(f"NIDM conversion output: {result.stdout}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Error in NIDM conversion for {log_prefix}: {str(e)}")
+        return False
+
+def process_participant(args, logger):
+    """Run the participant level analysis."""
+    logger.info("Starting participant level analysis")
     
-    logger.info(f"Participant level analysis complete. Processed {success_count} subjects successfully.")
+    # Initialize app
+    layout, segmenter, derivatives_dir, nidm_dir, temp_dir = initialize(args)
+    
+    # Get subject to process
+    available_subjects = layout.get_subjects()
+    participant_label = args.participant_label
+    if not participant_label.startswith('sub-'):
+        participant_label = f"sub-{participant_label}"
+    
+    bids_subject = participant_label[4:]  # Strip "sub-" for BIDS query
+    if bids_subject not in available_subjects:
+        logger.error(f"Subject {participant_label} not found in dataset")
+        return 1
+    
+    success = False  # Initialize success flag
+    # Process subject without sessions
+    if segmenter.run_subject(participant_label):
+        success = True
+        
+        # Convert segmentation to NIDM if requested
+        if not args.skip_nidm:
+            success = success and nidm_conversion(
+                logger,
+                derivatives_dir,
+                nidm_dir,
+                bids_subject,  # Pass without "sub-" prefix
+                verbose=args.verbose
+            )
+    
+    logger.info(f"Participant level analysis complete. Processing {'succeeded' if success else 'failed'}")
     
     # Clean up temporary files
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     
-    return 0
+    return 0 if success else 1
+
+def process_session(args, logger):
+    """Run the session level analysis."""
+    logger.info("Starting session level analysis")
+    
+    # Initialize app
+    layout, segmenter, derivatives_dir, nidm_dir, temp_dir = initialize(args)
+    
+    # Get subject to process
+    available_subjects = layout.get_subjects()
+    participant_label = args.participant_label
+    if not participant_label.startswith('sub-'):
+        participant_label = f"sub-{participant_label}"
+    
+    bids_subject = participant_label[4:]  # Strip "sub-" for BIDS query
+    if bids_subject not in available_subjects:
+        logger.error(f"Subject {participant_label} not found in dataset")
+        return 1
+
+    # Validate that the session exists
+    available_sessions = layout.get_sessions(subject=bids_subject)
+    session_label = args.session_label
+    if not session_label.startswith('ses-'):
+        session_label = f"ses-{session_label}"
+    
+    bids_session = session_label[4:]  # Strip "ses-" for BIDS query
+    if bids_session not in available_sessions:
+        logger.error(f"Session {session_label} not found for subject {participant_label}")
+        return 1
+    
+    success = False  # Initialize success flag
+    if segmenter.run_subject(participant_label, session_label):
+        success = True
+        if not args.skip_nidm:
+            success = success and nidm_conversion(
+                logger,
+                derivatives_dir,
+                nidm_dir,
+                bids_subject,  # Pass without "sub-" prefix
+                bids_session,  # Pass without "ses-" prefix
+                args.verbose
+            )
+    
+    logger.info(f"Session level analysis complete. Processing {'succeeded' if success else 'failed'}")
+    
+    # Clean up temporary files
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    
+    return 0 if success else 1
 
 def main():
     """Main function to coordinate the workflow."""
@@ -279,10 +307,12 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     try:
-        # Run participant level analysis
-        return run_participant_level(args, logger)
+        if args.analysis_level == 'participant':
+            return process_participant(args, logger)
+        elif args.analysis_level == 'session':
+            return process_session(args, logger)
     except Exception as e:
-        logger.error(f"Error in participant level analysis: {str(e)}")
+        logger.error(f"Error in {args.analysis_level} level analysis: {str(e)}")
         return 1
 
 if __name__ == "__main__":

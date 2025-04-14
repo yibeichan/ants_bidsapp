@@ -5,6 +5,7 @@ import logging
 import ants
 import nibabel as nib
 import numpy as np
+from pathlib import Path
 
 class ANTsSegmentation:
     """
@@ -14,55 +15,51 @@ class ANTsSegmentation:
     """
     
     def __init__(self, 
-                 input_path=None, 
-                 output_path=None, 
-                 temp_path=None, 
+                 bids_dir=None, 
+                 output_dir=None,
+                 temp_dir=None,
                  priors=None,
                  modality='T1w',
                  prob_threshold=0.5,
                  num_threads=1,
                  verbose=False):
-        """
-        Initialize the ANTs segmentation wrapper.
+        """Initialize ANTs segmentation.
         
-        Parameters:
-        -----------
-        input_path : str
-            Path to the input BIDS dataset
-        output_path : str
-            Path where segmentation outputs will be saved
-        temp_path : str
-            Path for temporary files
+        Parameters
+        ----------
+        bids_dir : str or Path
+            Path to BIDS directory
+        output_dir : str or Path
+            Path to output directory
+        temp_dir : str or Path
+            Path to temporary directory
         priors : list
-            List of paths to prior probability maps for segmentation
+            List of paths to prior probability maps
         modality : str
-            Imaging modality to process (default: 'T1w')
+            Modality to process (default: T1w)
         prob_threshold : float
             Probability threshold for binary mask creation
         num_threads : int
-            Number of threads to use for processing
+            Number of threads to use
         verbose : bool
             Whether to print detailed logs
         """
-        self.input_path = input_path
-        self.output_path = output_path
-        self.temp_path = temp_path or os.path.join(output_path, 'tmp')
+        self.bids_dir = Path(bids_dir)
+        self.output_dir = Path(output_dir)
+        self.temp_dir = Path(temp_dir) if temp_dir else self.output_dir / 'tmp'
         self.priors = priors
         self.modality = modality
         self.prob_threshold = prob_threshold
         self.num_threads = num_threads
+        self.verbose = verbose
         
-        # Configure logging
-        log_level = logging.DEBUG if verbose else logging.INFO
-        logging.basicConfig(level=log_level, 
-                           format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        self.logger = logging.getLogger('ANTsSegmentation')
+        # Set up logging
+        self.logger = logging.getLogger('ants_bidsapp.segmentation')
         
         # Create necessary directories
-        if output_path and not os.path.exists(output_path):
-            os.makedirs(output_path)
-        if not os.path.exists(self.temp_path):
-            os.makedirs(self.temp_path)
+        if output_dir:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
     
     def load_image(self, image_path):
         """
@@ -114,15 +111,14 @@ class ANTsSegmentation:
         return brain_image
     
     def segment_image(self, image, priors=None, prior_weight=0.25, mrf=0.2, iterations=10):
-        """
-        Perform ANTs segmentation on the given image.
+        """Perform ANTs segmentation on the given image.
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         image : ants.ANTsImage
             Preprocessed image to segment
         priors : list, optional
-            List of prior probability maps
+            List of prior probability maps (defaults to self.priors)
         prior_weight : float, optional
             Weight for priors (0=initialization only, 0.25-0.5=regularization)
         mrf : float, optional
@@ -130,8 +126,8 @@ class ANTsSegmentation:
         iterations : int, optional
             Maximum number of iterations
             
-        Returns:
-        --------
+        Returns
+        -------
         dict
             Dictionary containing segmentation results
         """
@@ -140,104 +136,89 @@ class ANTsSegmentation:
         # Get mask for segmentation
         mask = ants.get_mask(image)
         
+        # Use provided priors or fall back to class-level priors
+        use_priors = priors if priors is not None else self.priors
+        
         # Use Atropos segmentation
-        if priors:
-            self.logger.debug("Using provided prior probability maps")
+        if use_priors:
+            self.logger.debug("Using prior probability maps")
             segmentation = ants.atropos(a=image, 
-                                        m=f'[{mrf},1x1x1]',
-                                        c=f'[{iterations},0]',
-                                        i=priors,
-                                        x=mask,
-                                        priorweight=prior_weight)
+                                      m=f'[{mrf},1x1x1]',
+                                      c=f'[{iterations},0]',
+                                      i=use_priors,
+                                      x=mask,
+                                      priorweight=prior_weight)
         else:
             self.logger.debug("Using kmeans initialization for segmentation")
             segmentation = ants.atropos(a=image, 
-                                        m=f'[{mrf},1x1x1]',
-                                        c=f'[{iterations},0]',
-                                        i='Kmeans[3]',
-                                        x=mask)
+                                      m=f'[{mrf},1x1x1]',
+                                      c=f'[{iterations},0]',
+                                      i='Kmeans[3]',
+                                      x=mask)
         
         return segmentation
     
-    def save_results(self, segmentation, subject_id, session_id=None, output_dir=None):
-        """
-        Save segmentation results in BIDS-compatible format and generate files for NIDM conversion.
-        
-        Parameters:
-        -----------
+    def _organize_bids_output(self, segmentation, bids_subject, bids_session=None):
+        """Organize ANTs outputs in BIDS-compliant format.
+
+        Parameters
+        ----------
         segmentation : dict
             Dictionary containing segmentation results
-        subject_id : str
-            Subject identifier
-        session_id : str, optional
-            Session identifier
-        output_dir : str, optional
-            Output directory (defaults to self.output_path)
+        bids_subject : str
+            Subject ID (without "sub-" prefix)
+        bids_session : str, optional
+            BIDS session label (without "ses-" prefix)
+        
+        Returns
+        -------
+        dict
+            Dictionary containing tissue and label volumes
         """
-        output_dir = output_dir or self.output_path
-        
-        # Create subject-specific output directory
-        if session_id:
-            subj_dir = os.path.join(output_dir, f"sub-{subject_id}", f"ses-{session_id}")
-        else:
-            subj_dir = os.path.join(output_dir, f"sub-{subject_id}")
-        
-        anat_dir = os.path.join(subj_dir, "anat")
-        if not os.path.exists(anat_dir):
-            os.makedirs(anat_dir)
-        
-        # Create stats directory for NIDM conversion
-        stats_dir = os.path.join(subj_dir, "stats")
-        if not os.path.exists(stats_dir):
-            os.makedirs(stats_dir)
-        
-        # Save labeled image
-        self.logger.info(f"Saving segmentation results to {anat_dir}")
-        
+        # Set up directories
+        session_part = f"_ses-{bids_session}" if bids_session else ""
+        bids_subject_dir = self.output_dir / f"sub-{bids_subject}"
+        if bids_session:
+            bids_subject_dir = bids_subject_dir / f"ses-{bids_session}"
+
+        anat_dir = bids_subject_dir / "anat"
+        stats_dir = bids_subject_dir / "stats"
+        anat_dir.mkdir(parents=True, exist_ok=True)
+        stats_dir.mkdir(parents=True, exist_ok=True)
+
         # Save probability maps and create binary masks
         tissue_volumes = {}  # Store volumes for brainvols.csv
         label_volumes = {}   # Store volumes for labelstats.csv
         
+        # Save probability maps and binary masks
         for idx, prob in enumerate(segmentation['probabilityimages']):
             tissue_type = f"tissue{idx+1}"
             
-            # BIDS-compatible filename
-            if session_id:
-                prob_filename = f"sub-{subject_id}_ses-{session_id}_space-orig_{tissue_type}_probseg.nii.gz"
-            else:
-                prob_filename = f"sub-{subject_id}_space-orig_{tissue_type}_probseg.nii.gz"
+            # Save probability map
+            prob_filename = f"sub-{bids_subject}{session_part}_space-orig_{tissue_type}_probseg.nii.gz"
+            prob_path = anat_dir / prob_filename
+            ants.image_write(prob, str(prob_path))
             
-            prob_path = os.path.join(anat_dir, prob_filename)
-            ants.image_write(prob, prob_path)
-            
-            # Create binary mask using threshold
+            # Create and save binary mask
             binary_mask = (prob.numpy() > self.prob_threshold).astype(np.uint8)
             binary_img = ants.from_numpy(binary_mask, origin=prob.origin, 
-                                        spacing=prob.spacing, direction=prob.direction)
+                                       spacing=prob.spacing, direction=prob.direction)
             
-            if session_id:
-                mask_filename = f"sub-{subject_id}_ses-{session_id}_space-orig_{tissue_type}_mask.nii.gz"
-            else:
-                mask_filename = f"sub-{subject_id}_space-orig_{tissue_type}_mask.nii.gz"
-            
-            mask_path = os.path.join(anat_dir, mask_filename)
-            ants.image_write(binary_img, mask_path)
+            mask_filename = f"sub-{bids_subject}{session_part}_space-orig_{tissue_type}_mask.nii.gz"
+            mask_path = anat_dir / mask_filename
+            ants.image_write(binary_img, str(mask_path))
             
             # Calculate tissue volume
             voxel_volume = np.prod(prob.spacing)
             tissue_volumes[tissue_type] = np.sum(binary_mask) * voxel_volume
         
         # Save labeled image
-        if session_id:
-            label_filename = f"sub-{subject_id}_ses-{session_id}_space-orig_dseg.nii.gz"
-        else:
-            label_filename = f"sub-{subject_id}_space-orig_dseg.nii.gz"
-        
-        label_path = os.path.join(anat_dir, label_filename)
-        ants.image_write(segmentation['segmentation'], label_path)
+        label_filename = f"sub-{bids_subject}{session_part}_space-orig_dseg.nii.gz"
+        label_path = anat_dir / label_filename
+        ants.image_write(segmentation['segmentation'], str(label_path))
         
         # Generate antslabelstats.csv
-        labelstats_file = os.path.join(stats_dir, "antslabelstats.csv")
+        labelstats_file = stats_dir / "antslabelstats.csv"
         with open(labelstats_file, 'w') as f:
             f.write("Label,Volume\n")  # Header for label stats
             
@@ -253,7 +234,7 @@ class ANTsSegmentation:
                     f.write(f"{int(label)},{volume:.2f}\n")
         
         # Generate antsbrainvols.csv
-        brainvols_file = os.path.join(stats_dir, "antsbrainvols.csv")
+        brainvols_file = stats_dir / "antsbrainvols.csv"
         with open(brainvols_file, 'w') as f:
             f.write("Name,Value\n")  # Header for brain volumes
             
@@ -270,98 +251,102 @@ class ANTsSegmentation:
                 f.write(f"GMVOL,{tissue_volumes['tissue2']:.2f}\n")
                 f.write(f"WMVOL,{tissue_volumes['tissue3']:.2f}\n")
         
-        self.logger.info("Segmentation results saved successfully")
+        self.logger.info("Segmentation results organized in BIDS format")
+        return {'tissue_volumes': tissue_volumes, 'label_volumes': label_volumes}
+
+    def save_results(self, segmentation, bids_subject, bids_session=None, output_dir=None):
+        """Save segmentation results in BIDS-compatible format and generate files for NIDM conversion.
         
-    def run_subject(self, subject_id, session_id=None):
-        """
-        Run the full segmentation pipeline for a subject.
-        
-        Parameters:
-        -----------
-        subject_id : str
+        Parameters
+        ----------
+        segmentation : dict
+            Dictionary containing segmentation results
+        bids_subject : str
             Subject identifier
-        session_id : str, optional
+        bids_session : str, optional
             Session identifier
-            
-        Returns:
-        --------
-        bool
-            True if processing completed successfully
+        output_dir : str, optional
+            Output directory (defaults to self.output_path)
         """
-        self.logger.info(f"Processing subject: {subject_id}" + 
-                        (f", session: {session_id}" if session_id else ""))
-        
+        if output_dir:
+            original_output = self.output_dir
+            self.output_dir = output_dir
+
         try:
-            # Construct path to the input image
-            if session_id:
-                bids_path = os.path.join(self.input_path, f"sub-{subject_id}", 
-                                         f"ses-{session_id}", "anat")
-                img_pattern = f"sub-{subject_id}_ses-{session_id}_{self.modality}.nii.gz"
+            # Organize outputs in BIDS format
+            volumes = self._organize_bids_output(segmentation, bids_subject, bids_session)
+            self.logger.info("Segmentation results saved successfully")
+            return volumes
+        finally:
+            if output_dir:
+                self.output_dir = original_output
+        
+    def run_subject(self, subject_id, session_label=None):
+        """Run ANTs segmentation for a subject.
+        
+        Parameters
+        ----------
+        subject_id : str
+            Subject ID (with "sub-" prefix)
+        session_label : str, optional
+            Session label (with "ses-" prefix)
+            
+        Returns
+        -------
+        bool
+            True if processing succeeded, False otherwise
+        """
+        try:
+            # Strip prefixes for BIDS queries
+            bids_subject = subject_id[4:] if subject_id.startswith('sub-') else subject_id
+            if session_label:
+                bids_session = session_label[4:] if session_label.startswith('ses-') else session_label
             else:
-                bids_path = os.path.join(self.input_path, f"sub-{subject_id}", "anat")
-                img_pattern = f"sub-{subject_id}_{self.modality}.nii.gz"
+                bids_session = None
+                
+            # Construct path to input image
+            if bids_session:
+                bids_path = self.bids_dir / f"sub-{bids_subject}" / f"ses-{bids_session}" / "anat"
+                img_pattern = f"sub-{bids_subject}_ses-{bids_session}_{self.modality}.nii.gz"
+            else:
+                bids_path = self.bids_dir / f"sub-{bids_subject}" / "anat"
+                img_pattern = f"sub-{bids_subject}_{self.modality}.nii.gz"
             
-            img_path = os.path.join(bids_path, img_pattern)
-            
-            if not os.path.exists(img_path):
-                self.logger.error(f"Input image not found: {img_path}")
+            # Find input image
+            input_file = list(bids_path.glob(img_pattern))
+            if not input_file:
+                self.logger.error(f"No {self.modality} image found for subject {subject_id}")
                 return False
             
-            # Load the image
-            img = self.load_image(img_path)
+            input_file = input_file[0]
+            self.logger.info(f"Processing {input_file}")
             
-            # Preprocess the image
+            # Load and preprocess image
+            img = self.load_image(str(input_file))
             preprocessed_img = self.preprocess_image(img)
             
-            # Segment the image
-            segmentation = self.segment_image(preprocessed_img, self.priors)
+            # Run segmentation
+            segmentation = self.segment_image(preprocessed_img)
+            if not segmentation:
+                return False
             
-            # Save the results
-            self.save_results(segmentation, subject_id, session_id)
+            # Save results and get volumes
+            volumes = self.save_results(segmentation, bids_subject, bids_session)
             
-            self.logger.info(f"Subject {subject_id} processed successfully")
+            # Log volume information
+            if volumes:
+                self.logger.info("Segmentation volumes:")
+                if 'tissue_volumes' in volumes:
+                    for tissue, volume in volumes['tissue_volumes'].items():
+                        self.logger.info(f"  {tissue}: {volume:.2f} mm³")
+                if 'label_volumes' in volumes:
+                    for label, volume in volumes['label_volumes'].items():
+                        self.logger.info(f"  Label {label}: {volume:.2f} mm³")
+            
+            self.logger.info(f"Segmentation complete for subject {subject_id}")
             return True
             
         except Exception as e:
             self.logger.error(f"Error processing subject {subject_id}: {str(e)}")
             return False
-    
-    def run_dataset(self):
-        """
-        Run the segmentation pipeline on all subjects in the BIDS dataset.
         
-        Returns:
-        --------
-        dict
-            Dictionary with processing status for each subject
-        """
-        self.logger.info(f"Processing BIDS dataset at {self.input_path}")
-        
-        # Get list of subjects
-        subjects = [d for d in os.listdir(self.input_path) if d.startswith('sub-')]
-        
-        results = {}
-        
-        for subject in subjects:
-            subject_id = subject.replace('sub-', '')
-            subject_dir = os.path.join(self.input_path, subject)
-            
-            # Check for sessions
-            sessions = [d for d in os.listdir(subject_dir) if d.startswith('ses-')]
-            
-            if sessions:
-                # Process each session
-                for session in sessions:
-                    session_id = session.replace('ses-', '')
-                    success = self.run_subject(subject_id, session_id)
-                    results[f"{subject_id}/{session_id}"] = success
-            else:
-                # Process subject without session
-                success = self.run_subject(subject_id)
-                results[subject_id] = success
-        
-        # Log summary
-        success_count = sum(1 for v in results.values() if v)
-        self.logger.info(f"Processing complete. Successful: {success_count}/{len(results)}")
-        
-        return results
