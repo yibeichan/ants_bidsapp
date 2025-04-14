@@ -13,7 +13,7 @@ import subprocess
 from bids import BIDSLayout
 
 # Import local modules
-from src.ants.wrapper import ANTsSegmentation
+from src.antspy.wrapper import ANTsSegmentation
 
 def setup_logger(log_dir, verbose=False):
     """Set up logging configuration."""

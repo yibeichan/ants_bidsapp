@@ -14,7 +14,7 @@ import numpy as np
 import nibabel as nib
 
 # Import from the ANTs BIDS app
-from src.ants.wrapper import ANTsSegmentation
+from src.antspy.wrapper import ANTsSegmentation
 
 
 class TestANTsSegmentation(unittest.TestCase):

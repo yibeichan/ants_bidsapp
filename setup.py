@@ -132,6 +132,7 @@ def install_antspyx():
 
 # Handle dependency conflicts by defining dependencies with proper constraints
 install_requires = [
+    "antspyx",
     "nibabel>=5.0.0",
     "numpy>=1.20.0",
     "pandas>=1.3.0",

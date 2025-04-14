@@ -62,26 +62,28 @@ class ANTsSegmentation:
         self.temp_dir.mkdir(parents=True, exist_ok=True)
     
     def load_image(self, image_path):
-        """
-        Load an image using ANTsPy.
+        """Load an image using ANTs.
         
-        Parameters:
-        -----------
-        image_path : str
+        Parameters
+        ----------
+        image_path : str or Path
             Path to the image file
             
-        Returns:
-        --------
-        ants.ANTsImage
-            Loaded ANTs image
+        Returns
+        -------
+        ants.ANTsImage or None
+            Loaded image or None if loading fails
         """
-        self.logger.info(f"Loading image: {image_path}")
         try:
-            img = ants.image_read(image_path)
+            self.logger.info(f"Loading image: {image_path}")
+            img = ants.image_read(str(image_path))
+            if img is None:
+                self.logger.error(f"Failed to load image {image_path}")
+                return None
             return img
         except Exception as e:
             self.logger.error(f"Failed to load image {image_path}: {str(e)}")
-            raise
+            return None
     
     def preprocess_image(self, image):
         """
