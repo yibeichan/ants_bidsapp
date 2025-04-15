@@ -43,9 +43,10 @@ class ANTsSegmentation:
         verbose : bool
             Whether to print detailed logs
         """
+        # Convert all path inputs to Path objects
         self.bids_dir = Path(bids_dir) if bids_dir else None
         self.output_dir = Path(output_dir) if output_dir else None
-        self.temp_dir = Path(temp_dir) if temp_dir else (self.output_dir / 'tmp' if output_dir else None)
+        self.temp_dir = Path(temp_dir) if temp_dir else (Path(output_dir) / 'tmp' if output_dir else None)
         
         # Set container paths
         self.template_dir = Path('/opt/data/OASIS-30_Atropos_template')
@@ -490,12 +491,12 @@ class ANTsSegmentation:
             Subject identifier
         bids_session : str, optional
             Session identifier
-        output_dir : str, optional
+        output_dir : str or Path, optional
             Output directory (defaults to self.output_path)
         """
         if output_dir:
             original_output = self.output_dir
-            self.output_dir = output_dir
+            self.output_dir = Path(output_dir)
 
         try:
             # Organize outputs in BIDS format

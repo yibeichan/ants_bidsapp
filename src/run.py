@@ -125,9 +125,9 @@ def initialize(args):
     
     # Initialize segmentation with appropriate parameters
     segmenter = ANTsSegmentation(
-        bids_dir=args.bids_dir,
-        output_dir=derivatives_dir,
-        temp_dir=temp_dir,
+        bids_dir=str(args.bids_dir),
+        output_dir=str(derivatives_dir),
+        temp_dir=str(temp_dir),
         modality=args.modality,
         prob_threshold=args.prob_threshold,
         num_threads=args.num_threads,
@@ -136,6 +136,7 @@ def initialize(args):
     
     # Create NIDM output directory
     nidm_dir = output_dir / 'nidm'
+    nidm_dir.mkdir(parents=True, exist_ok=True)
     
     return layout, segmenter, derivatives_dir, nidm_dir, temp_dir
 
@@ -184,11 +185,11 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
                 logger.error(f"Required file not found: {file_path}")
                 return False
         
-        # Convert all paths to absolute paths
-        label_stats = label_stats.absolute()
-        brain_vols = brain_vols.absolute()
-        seg_path = seg_path.absolute()
-        nidm_dir = nidm_dir.absolute()
+        # Convert all paths to strings for subprocess call
+        label_stats = str(label_stats.absolute())
+        brain_vols = str(brain_vols.absolute())
+        seg_path = str(seg_path.absolute())
+        nidm_file = str(nidm_file.absolute())
         
         # Construct the command to run ants_seg_to_nidm.py
         cmd = [
