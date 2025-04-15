@@ -32,6 +32,7 @@ From: ubuntu:22.04
     mkdir -p /opt/src
 
 %files
+    ./data /opt/data
     ./src /opt/src
     ./requirements.txt /opt/requirements.txt
 

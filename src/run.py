@@ -11,9 +11,19 @@ import shutil
 from datetime import datetime
 import subprocess
 from bids import BIDSLayout
+import ants
+import pkg_resources
 
 # Import local modules
 from src.antspy.wrapper import ANTsSegmentation
+
+def get_bids_version():
+    """Get the version of the installed bids package."""
+    try:
+        return pkg_resources.get_distribution('pybids').version
+    except pkg_resources.DistributionNotFound:
+        # Fallback to a recent stable version if package info not found
+        return "1.8.0"
 
 def setup_logger(log_dir, verbose=False):
     """Set up logging configuration."""
@@ -37,7 +47,7 @@ def create_dataset_description(output_dir, app_version):
     """Create a dataset_description.json file in the output directory."""
     dataset_description = {
         "Name": "ANTs segmentation derivatives",
-        "BIDSVersion": "1.7.0",
+        "BIDSVersion": get_bids_version(),
         "DatasetType": "derivative",
         "GeneratedBy": [
             {
@@ -64,14 +74,16 @@ def parse_arguments():
     
     # Optional arguments
     parser.add_argument('--participant-label', help='The label of the participant that should be analyzed. The label corresponds to sub-<participant_label> from the BIDS spec.')
-    parser.add_argument('--session-label', help='The label(s) of the session(s) that should be analyzed. The label corresponds to ses-<session_label> from the BIDS spec. If this parameter is not provided, all sessions will be analyzed. Multiple sessions can be specified with a space-separated list.',
-                        nargs='+')
+    parser.add_argument('--session-label', help='The label of the session that should be analyzed. The label corresponds to ses-<session_label> from the BIDS spec.')
     parser.add_argument('--modality', help='Modality to process [default: T1w]',
                         default='T1w')
     parser.add_argument('--prob-threshold', help='Probability threshold for binary mask creation [default: 0.5]',
                         type=float, default=0.5)
-    parser.add_argument('--priors', help='Paths to prior probability maps for segmentation',
-                        nargs='+')
+    
+    # Segmentation method
+    parser.add_argument('--method', help='Segmentation method to use [default: fusion]',
+                        choices=['quick', 'fusion'], default='fusion')
+    
     parser.add_argument('--skip-bids-validation', help='Skip BIDS validation step',
                         action='store_true')
     parser.add_argument('--skip-nidm', help='Skip NIDM conversion step',
@@ -111,18 +123,17 @@ def initialize(args):
     temp_dir = output_dir / 'tmp'
     temp_dir.mkdir(parents=True, exist_ok=True)
     
-    # Initialize ANTs segmentation
+    # Initialize segmentation with appropriate parameters
     segmenter = ANTsSegmentation(
         bids_dir=args.bids_dir,
         output_dir=derivatives_dir,
         temp_dir=temp_dir,
-        priors=args.priors,
         modality=args.modality,
         prob_threshold=args.prob_threshold,
         num_threads=args.num_threads,
         verbose=args.verbose
     )
-
+    
     # Create NIDM output directory
     nidm_dir = output_dir / 'nidm'
     
@@ -153,13 +164,15 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
             seg_path = subject_dir / "anat" / f"sub-{bids_subject}_space-orig_dseg.nii.gz"
             stats_dir = subject_dir / "stats"
             log_prefix = f"subject {bids_subject}"
+            nidm_file = nidm_dir / f"sub-{bids_subject}_space-orig_dseg.json-ld"
         else:
             # Multi-session case
             subject_dir = derivatives_dir / f"sub-{bids_subject}" / f"ses-{bids_session}"
             seg_path = subject_dir / "anat" / f"sub-{bids_subject}_ses-{bids_session}_space-orig_dseg.nii.gz"
             stats_dir = subject_dir / "stats"
             log_prefix = f"subject {bids_subject}, session {bids_session}"
-        
+            nidm_file = nidm_dir / f"sub-{bids_subject}_ses-{bids_session}_space-orig_dseg.json-ld"
+            
         # Define paths to the statistics files
         label_stats = stats_dir / "antslabelstats.csv"
         brain_vols = stats_dir / "antsbrainvols.csv"
@@ -171,20 +184,31 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
                 logger.error(f"Required file not found: {file_path}")
                 return False
         
+        # Convert all paths to absolute paths
+        label_stats = label_stats.absolute()
+        brain_vols = brain_vols.absolute()
+        seg_path = seg_path.absolute()
+        nidm_dir = nidm_dir.absolute()
+        
         # Construct the command to run ants_seg_to_nidm.py
         cmd = [
-            "python", 
-            str(Path(__file__).parent / "ants_seg_to_nidm" / "ants_seg_to_nidm" / "ants_seg_to_nidm.py"),
+            "python", "-m",
+            "ants_seg_to_nidm.ants_seg_to_nidm.ants_seg_to_nidm",
             "-f", f"{label_stats},{brain_vols},{seg_path}",
             "-subjid", f"sub-{bids_subject}",
-            "-o", str(nidm_dir),
+            "-o", nidm_file,
             "-j"  # Output in JSON-LD format
         ]
         
         logger.info(f"Converting segmentation to NIDM for {log_prefix}")
         logger.info(f"Running command: {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Run the command from the script's directory
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+        )
         
         if result.returncode != 0:
             logger.error(f"Error in NIDM conversion: {result.stderr}")
@@ -218,8 +242,9 @@ def process_participant(args, logger):
         return 1
     
     success = False  # Initialize success flag
-    # Process subject without sessions
-    if segmenter.run_subject(participant_label):
+    
+    # Process subject
+    if segmenter.run_subject(participant_label, method=args.method):
         success = True
         
         # Convert segmentation to NIDM if requested
@@ -270,7 +295,9 @@ def process_session(args, logger):
         return 1
     
     success = False  # Initialize success flag
-    if segmenter.run_subject(participant_label, session_label):
+    
+    # Process session
+    if segmenter.run_subject(participant_label, session_label, method=args.method):
         success = True
         if not args.skip_nidm:
             success = success and nidm_conversion(

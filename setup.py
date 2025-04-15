@@ -137,6 +137,7 @@ install_requires = [
     "numpy>=1.20.0",
     "pandas>=1.3.0",
     "pytest>=7.0.0",
+    "natsort>=8.0.0",
 ]
 
 # Check if we're being called with a container build command

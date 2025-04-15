@@ -29,13 +29,10 @@ RUN python -m pip install --upgrade pip setuptools wheel
 # Set working directory
 WORKDIR /opt
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN python -m pip install -r requirements.txt
-
 # Copy the application code
 COPY src/ /opt/src/
 COPY requirements.txt /opt/requirements.txt
+COPY data/ /opt/data/
 
 # Install ants_seg_to_nidm
 RUN cd src/ants_seg_to_nidm && \
