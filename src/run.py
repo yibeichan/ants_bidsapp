@@ -15,7 +15,7 @@ import ants
 import pkg_resources
 
 # Import local modules
-from src.antspy.wrapper import ANTsSegmentation
+from antspy.wrapper import ANTsSegmentation
 
 def get_bids_version():
     """Get the version of the installed bids package."""

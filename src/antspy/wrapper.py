@@ -278,7 +278,7 @@ class ANTsSegmentation:
         """
         # Run cortical thickness to get N4 correction and brain mask
         self.logger.info("Running cortical thickness pipeline for preprocessing")
-        thickness_results = self.compute_cortical_thickness(image, self.template_dir)
+        thickness_results = self.compute_cortical_thickness(image)
         
         # Create masked brain image (equivalent to MultiplyImages node)
         self.logger.info("Creating masked brain image")
@@ -291,17 +291,16 @@ class ANTsSegmentation:
                 
             template_labels = ants.image_read(str(self.template_labels_path))
             
-            # Apply template-to-subject transforms to labels (equivalent to transformer_nn node)
+            # Apply template-to-subject transforms to labels
             warped_labels = ants.apply_transforms(
-                fixed=thickness_results['BrainSegmentationN4'],  # Use N4 image as reference
+                fixed=thickness_results['BrainSegmentationN4'],
                 moving=template_labels,
                 transformlist=[
-                    thickness_results['TemplateToSubject1GenericAffine'],  # Affine transform
-                    thickness_results['TemplateToSubject0Warp']  # Warp transform
+                    thickness_results['TemplateToSubject1GenericAffine'],
+                    thickness_results['TemplateToSubject0Warp']
                 ],
-                interpolator='NearestNeighbor',
-                dimension=3,
-                invert_transform_flags=[False, False]
+                interpolator='nearestNeighbor',
+                whichtoinvert=[False, False]
             )
             
             return {
@@ -325,63 +324,53 @@ class ANTsSegmentation:
             atlas_images = [ants.image_read(str(path)) for path in T1s]
             atlas_labels = [ants.image_read(str(path)) for path in labels]
             
-            # Register each atlas to the masked brain (equivalent to Registration node)
+            # Register each atlas to the masked brain
             warped_images = []
             warped_labels = []
             
             for atlas_img, atlas_lab in zip(atlas_images, atlas_labels):
-                # Register atlas to target using exact nipype parameters
+                # Register atlas to target
                 reg = ants.registration(
                     fixed=masked_brain,
                     moving=atlas_img,
-                    dimension=3,
-                    convergence_threshold=[1e-06, 1e-06, 1e-06],
-                    convergence_window_size=[20, 20, 10],
-                    metric=["Mattes", "Mattes", "CC"],
-                    metric_weight=[1, 1, 1],
-                    radius_or_number_of_bins=[56, 56, 4],
-                    transforms=["Rigid", "Affine", "SyN"],
-                    transform_parameters=[(0.05,), (0.08,), (0.1, 3.0, 0.0)],
-                    number_of_iterations=[[100, 100], [100, 100], [100, 70, 50, 20]],
-                    sampling_strategy=["Regular", "Regular", "None"],
-                    sampling_percentage=[0.25, 0.25, 1],
-                    smoothing_sigmas=[[2, 1], [1, 0], [3, 2, 1, 0]],
-                    sigma_units=["vox", "vox", "vox"],
-                    shrink_factors=[[2, 1], [2, 1], [8, 4, 2, 1]],
-                    winsorize_upper_quantile=0.995,
-                    winsorize_lower_quantile=0.005,
-                    use_estimate_learning_rate_once=[True, True, True],
-                    use_histogram_matching=[True, True, True],
-                    collapse_output_transforms=True,
-                    write_composite_transform=True,
-                    output_transform_prefix="output_",
-                    output_warped_image=True,
-                    interpolation="LanczosWindowedSinc",
-                    float=True,
-                    initial_moving_transform_com=0,
-                    num_threads=self.num_threads if self.num_threads > 1 else None
+                    type_of_transform='SyNRA',  # Combined rigid, affine, and SyN registration
+                    reg_iterations=[200, 200, 100],
+                    transform_parameters=(0.1, 3, 0),
+                    flow_sigma=3,
+                    total_sigma=0,
+                    aff_metric='mattes',
+                    syn_metric='mattes',
+                    verbose=True
                 )
                 
-                # Apply transforms to atlas labels (equivalent to transformer_nn node)
+                # Apply transforms to atlas labels
                 warped_lab = ants.apply_transforms(
                     fixed=masked_brain,
                     moving=atlas_lab,
                     transformlist=reg['fwdtransforms'],
-                    interpolator='NearestNeighbor',
-                    dimension=3
+                    interpolator='nearestNeighbor',
+                    whichtoinvert=[False] * len(reg['fwdtransforms'])
                 )
                 
                 warped_images.append(reg['warpedmovout'])
                 warped_labels.append(warped_lab)
             
-            # Perform joint label fusion (equivalent to AntsJointFusion node)
+            # Perform joint label fusion
+            self.logger.info("Running joint label fusion")
             fusion = ants.joint_label_fusion(
                 target_image=masked_brain,
                 target_image_mask=thickness_results['BrainExtractionMask'],
                 atlas_list=warped_images,
                 label_list=warped_labels,
-                dimension=3,
-                num_threads=self.num_threads if self.num_threads > 1 else None
+                beta=4.0,
+                rad=2,
+                rho=0.01,
+                usecor=False,
+                r_search=3,
+                nonnegative=False,
+                no_zeroes=False,
+                max_lab_plus_one=False,
+                verbose=True
             )
             
             return {
@@ -584,48 +573,49 @@ class ANTsSegmentation:
             self.logger.error(f"Error processing subject {subject_id}: {str(e)}")
             return False
         
-    def compute_cortical_thickness(self, image, template_dir):
+    def compute_cortical_thickness(self, image):
         """Compute cortical thickness using ANTs.
         
         Parameters
         ----------
         image : ants.ANTsImage
             Input brain image
-        template_dir : str or Path
-            Path to template directory containing required files
             
         Returns
         -------
         dict
-            Dictionary containing:
-            - 'BrainSegmentationN4': N4 bias corrected image
-            - 'BrainExtractionMask': Brain mask
-            - 'TemplateToSubject1GenericAffine': Affine transform
-            - 'TemplateToSubject0Warp': Warp transform
+            Dictionary containing segmentation results
         """
-        template_dir = Path(template_dir)
-        
-        # Load templates
-        brain_template = ants.image_read(str(template_dir / 'T_template0.nii.gz'))
-        reg_template = ants.image_read(str(template_dir / 'T_template0_BrainCerebellum.nii.gz'))
-        prob_mask = ants.image_read(str(template_dir / 'T_template0_BrainCerebellumProbabilityMask.nii.gz'))
-        ext_mask = ants.image_read(str(template_dir / 'T_template0_BrainCerebellumExtractionMask.nii.gz'))
-        
         self.logger.info("Starting cortical thickness computation")
         
         # N4 bias field correction
         self.logger.info("Performing N4 bias field correction")
-        n4_image = ants.n4_bias_field_correction(image)
+        n4_image = ants.n4_bias_field_correction(
+            image,
+            shrink_factor=4,
+            convergence={'iters': [50, 50, 50, 50], 'tol': 1e-7},
+            spline_param=200
+        )
         
         # Initial brain extraction using registration template and probability mask
         self.logger.info("Performing initial brain extraction")
+        reg_template = ants.image_read(str(self.template_dir / 'T_template0_BrainCerebellum.nii.gz'))
+        prob_mask = ants.image_read(str(self.template_dir / 'T_template0_BrainCerebellumProbabilityMask.nii.gz'))
+        
+        # Initial rigid registration
         init_reg = ants.registration(
             fixed=reg_template,
             moving=n4_image,
-            type_of_transform='Rigid'
+            type_of_transform='Rigid',
+            aff_metric='mattes',
+            aff_sampling=32,
+            aff_random_sampling_rate=0.2,
+            reg_iterations=[1000, 500, 250],
+            verbose=True,
+            random_seed=1
         )
         
-        # Apply transforms to probability mask
+        # Transform probability mask to subject space
         init_mask = ants.apply_transforms(
             fixed=n4_image,
             moving=prob_mask,
@@ -633,31 +623,69 @@ class ANTsSegmentation:
             interpolator='lanczosWindowedSinc'
         )
         
-        # Create initial brain mask
-        init_brain_mask = init_mask > 0.5
-        init_brain = n4_image * init_brain_mask
+        # Create brain mask and extract brain
+        brain_mask = ants.threshold_image(init_mask, 0.5, 1.0)
+        brain_mask = ants.iMath(brain_mask, "FillHoles")
+        brain_mask = ants.iMath(brain_mask, "GetLargestComponent")
+        brain_image = n4_image * brain_mask
         
-        # Perform template registration with brain-extracted image
+        # Register to brain template
         self.logger.info("Registering to template")
-        reg = ants.registration(
-            fixed=brain_template,
-            moving=init_brain,
-            type_of_transform='SyN',
-            mask=init_brain_mask
-        )
+        brain_template = ants.image_read(str(self.template_dir / 'T_template0.nii.gz'))
         
-        # Apply registration to extraction mask
-        brain_mask = ants.apply_transforms(
+        try:
+            # First try affine registration
+            affine_reg = ants.registration(
+                fixed=brain_template,
+                moving=brain_image,
+                type_of_transform='Affine',
+                aff_metric='mattes',
+                aff_sampling=32,
+                reg_iterations=[100, 100, 100],
+                verbose=True,
+                random_seed=1
+            )
+            
+            # Then try SyN registration starting from affine
+            reg = ants.registration(
+                fixed=brain_template,
+                moving=brain_image,
+                type_of_transform='SyN',
+                initial_transform=affine_reg['fwdtransforms'][0],
+                aff_metric='mattes',
+                syn_metric='mattes',
+                reg_iterations=[100, 70, 50, 20],
+                verbose=True,
+                random_seed=1
+            )
+            
+            transforms = [
+                reg['fwdtransforms'][0],  # Affine transform
+                reg['fwdtransforms'][1]   # Warp transform
+            ]
+            
+        except Exception as e:
+            self.logger.warning(f"SyN registration failed: {str(e)}")
+            self.logger.info("Using affine registration only")
+            transforms = [affine_reg['fwdtransforms'][0]]
+        
+        # Apply final transforms to extraction mask
+        ext_mask = ants.image_read(str(self.template_dir / 'T_template0_BrainCerebellumExtractionMask.nii.gz'))
+        final_mask = ants.apply_transforms(
             fixed=n4_image,
             moving=ext_mask,
-            transformlist=reg['invtransforms'],
+            transformlist=transforms,
             interpolator='nearestNeighbor'
         )
         
+        # Ensure final mask is binary
+        final_mask = ants.threshold_image(final_mask, 0.5, 1.0)
+        final_mask = ants.iMath(final_mask, "FillHoles")
+        final_mask = ants.iMath(final_mask, "GetLargestComponent")
+        
         return {
             'BrainSegmentationN4': n4_image,
-            'BrainExtractionMask': brain_mask,
-            'TemplateToSubject1GenericAffine': reg['fwdtransforms'][0],
-            'TemplateToSubject0Warp': reg['fwdtransforms'][1]
+            'BrainExtractionMask': final_mask,
+            'TemplateToSubject1GenericAffine': transforms[0],
+            'TemplateToSubject0Warp': transforms[1] if len(transforms) > 1 else None
         }
-        
