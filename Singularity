@@ -13,6 +13,8 @@ From: ubuntu:22.04
         libpng-dev \
         pkg-config \
         git \
+        wget \
+        unzip \
         && apt clean && \
         rm -rf /var/lib/apt/lists/*
 
@@ -28,11 +30,32 @@ From: ubuntu:22.04
     # Upgrade pip and install basic Python tools
     python3 -m pip install --upgrade pip setuptools wheel
 
-    # Create application directory
+    # Create application directories
     mkdir -p /opt/src
+    mkdir -p /opt/data
+
+    # Download and extract template files
+    cd /opt/data
+
+    # Download and extract OASIS-30 Atropos template
+    wget -O OASIS-30_Atropos_template.zip "https://osf.io/rh9km/?action=download&version=1"
+    unzip -o OASIS-30_Atropos_template.zip
+    rm OASIS-30_Atropos_template.zip
+
+    # Download and extract OASIS-TRT-20 brains
+    wget -O OASIS-TRT-20_brains.zip "https://files.osf.io/v1/resources/hs8am/providers/osfstorage/57c1a8f06c613b01f98d68a9/?zip="
+    unzip -o OASIS-TRT-20_brains.zip -d OASIS-TRT-20_brains
+    rm OASIS-TRT-20_brains.zip
+
+    # Download and extract OASIS-TRT-20 DKT31 CMA labels
+    wget -O OASIS-TRT-20_DKT31_CMA_labels_v2.zip "https://files.osf.io/v1/resources/hs8am/providers/osfstorage/57c1a8ffb83f690201c4a8be/?zip="
+    unzip -o OASIS-TRT-20_DKT31_CMA_labels_v2.zip -d OASIS-TRT-20_DKT31_CMA_labels_v2
+    rm OASIS-TRT-20_DKT31_CMA_labels_v2.zip
+
+    # Download joint fusion labels
+    wget -O OASIS-TRT-20_jointfusion_DKT31_CMA_labels_in_OASIS-30_v2.nii.gz "https://osf.io/download/nxg5t/"
 
 %files
-    ./data /opt/data
     ./src /opt/src
     ./requirements.txt /opt/requirements.txt
 
@@ -44,6 +67,7 @@ From: ubuntu:22.04
     # Install ants_seg_to_nidm
     cd /opt/src/ants_seg_to_nidm
     python3 -m pip install -e .
+    python3 -m pip install -r requirements.txt
 
 %environment
     # Add opt to Python path
@@ -69,4 +93,4 @@ From: ubuntu:22.04
       singularity run [container] [input_dir] [output_dir] participant [options]
 
     Example:
-      singularity run ants_bidsapp.sif $PWD/inputs/data/BIDS $PWD/outputs/ants participant --participant-label 01 02 03 --session-label 01 --modality T1w 
+      singularity run ants_bidsapp.sif $PWD/inputs/data/BIDS $PWD/outputs/ants participant --participant-label 01 02 03 --session-label 01 --modality T1w
