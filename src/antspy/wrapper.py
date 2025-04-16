@@ -630,7 +630,7 @@ class ANTsSegmentation:
             fixed=n4_image,
             moving=prob_mask,
             transformlist=init_reg['invtransforms'],
-            interpolator='Linear'
+            interpolator='lanczosWindowedSinc'
         )
         
         # Create initial brain mask
@@ -651,7 +651,7 @@ class ANTsSegmentation:
             fixed=n4_image,
             moving=ext_mask,
             transformlist=reg['invtransforms'],
-            interpolator='NearestNeighbor'
+            interpolator='nearestNeighbor'
         )
         
         return {
