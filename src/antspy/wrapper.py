@@ -48,11 +48,48 @@ class ANTsSegmentation:
         self.output_dir = Path(output_dir) if output_dir else None
         self.temp_dir = Path(temp_dir) if temp_dir else (Path(output_dir) / 'tmp' if output_dir else None)
         
-        # Set container paths
-        self.template_dir = Path('/opt/data/OASIS-30_Atropos_template')
-        self.atlas_dir = Path('/opt/data/OASIS-TRT-20_brains')
-        self.labels_dir = Path('/opt/data/OASIS-TRT-20_DKT31_CMA_labels_v2')
-        self.template_labels_path = Path('/opt/data/OASIS-TRT-20_jointfusion_DKT31_CMA_labels_in_OASIS-30_v2.nii.gz')
+        # Set data paths - check both container and local paths
+        # First check for container path, then local development path
+        if Path('/opt/data').exists():
+            base_data_dir = Path('/opt/data')
+        else:
+            # Check for local data directory relative to the package
+            local_data_dir = Path(__file__).parent.parent.parent / 'data'
+            if local_data_dir.exists():
+                base_data_dir = local_data_dir
+            else:
+                base_data_dir = Path('/opt/data')  # Fallback to container path
+        
+        # OASIS-30 template might be in a subdirectory after extraction
+        potential_template_dirs = [
+            base_data_dir / 'OASIS-30_Atropos_template',
+            base_data_dir / 'OASIS-30_Atropos_template_ants',
+            base_data_dir
+        ]
+        self.template_dir = None
+        for d in potential_template_dirs:
+            if d.exists() and (d / 'T_template0.nii.gz').exists():
+                self.template_dir = d
+                break
+        if not self.template_dir:
+            self.template_dir = base_data_dir / 'OASIS-30_Atropos_template'
+            
+        # Atlas directories might be nested after extraction
+        self.atlas_dir = base_data_dir / 'OASIS-TRT-20_brains'
+        if not self.atlas_dir.exists():
+            # Check if it's nested
+            potential_atlas = base_data_dir / 'OASIS-TRT-20_brains' / 'OASIS-TRT-20_brains'
+            if potential_atlas.exists():
+                self.atlas_dir = potential_atlas
+                
+        self.labels_dir = base_data_dir / 'OASIS-TRT-20_DKT31_CMA_labels_v2' 
+        if not self.labels_dir.exists():
+            # Check if it's nested
+            potential_labels = base_data_dir / 'OASIS-TRT-20_DKT31_CMA_labels_v2' / 'OASIS-TRT-20_DKT31_CMA_labels_v2'
+            if potential_labels.exists():
+                self.labels_dir = potential_labels
+                
+        self.template_labels_path = base_data_dir / 'OASIS-TRT-20_jointfusion_DKT31_CMA_labels_in_OASIS-30_v2.nii.gz'
         
         self.modality = modality
         self.prob_threshold = prob_threshold
@@ -68,6 +105,8 @@ class ANTsSegmentation:
         if not self.output_dir:
             raise ValueError("Output directory must be specified")
         if not self.template_dir.exists():
+            self.logger.error(f"Template directory not found: {self.template_dir}")
+            self.logger.error(f"Contents of /opt/data: {list(base_data_dir.iterdir()) if base_data_dir.exists() else 'Directory not found'}")
             raise ValueError(f"Template directory not found: {self.template_dir}")
         
         # Create necessary directories
@@ -78,9 +117,23 @@ class ANTsSegmentation:
         # Load templates
         self.templates = self._load_templates()
         
-        # Validate atlas directories
-        if not self.atlas_dir.exists() or not self.labels_dir.exists():
-            self.logger.warning("Atlas directories not found. Only 'quick' segmentation method will be available.")
+        # Validate atlas directories and log detailed information
+        if not self.atlas_dir.exists():
+            self.logger.warning(f"Atlas directory not found: {self.atlas_dir}")
+            self.logger.warning("Only 'quick' segmentation method will be available.")
+        else:
+            atlas_files = list(self.atlas_dir.glob('*.nii.gz'))
+            self.logger.info(f"Found {len(atlas_files)} atlas files in {self.atlas_dir}")
+            
+        if not self.labels_dir.exists():
+            self.logger.warning(f"Labels directory not found: {self.labels_dir}")
+            self.logger.warning("Only 'quick' segmentation method will be available.")
+        else:
+            label_files = list(self.labels_dir.glob('*.nii.gz'))
+            self.logger.info(f"Found {len(label_files)} label files in {self.labels_dir}")
+            
+        if not self.template_labels_path.exists():
+            self.logger.warning(f"Template labels file not found: {self.template_labels_path}")
             
     def _load_templates(self):
         """Load OASIS-30 Atropos templates.
@@ -292,15 +345,27 @@ class ANTsSegmentation:
             template_labels = ants.image_read(str(self.template_labels_path))
             
             # Apply template-to-subject transforms to labels
+            # Build transform list based on what's available
+            transformlist = []
+            whichtoinvert = []
+            
+            if thickness_results.get('TemplateToSubject1GenericAffine'):
+                transformlist.append(thickness_results['TemplateToSubject1GenericAffine'])
+                whichtoinvert.append(False)
+                
+            if thickness_results.get('TemplateToSubject0Warp'):
+                transformlist.append(thickness_results['TemplateToSubject0Warp'])
+                whichtoinvert.append(False)
+                
+            if not transformlist:
+                raise ValueError("No transforms available for template-to-subject mapping")
+                
             warped_labels = ants.apply_transforms(
                 fixed=thickness_results['BrainSegmentationN4'],
                 moving=template_labels,
-                transformlist=[
-                    thickness_results['TemplateToSubject1GenericAffine'],
-                    thickness_results['TemplateToSubject0Warp']
-                ],
+                transformlist=transformlist,
                 interpolator='nearestNeighbor',
-                whichtoinvert=[False, False]
+                whichtoinvert=whichtoinvert
             )
             
             return {
@@ -310,15 +375,29 @@ class ANTsSegmentation:
             }
             
         elif method == 'fusion':
-            if not self.atlas_dir.exists() or not self.labels_dir.exists():
-                raise ValueError("Atlas directories not found. Cannot use 'fusion' method.")
+            if not self.atlas_dir.exists():
+                self.logger.error(f"Atlas directory not found: {self.atlas_dir}")
+                raise ValueError(f"Atlas directory not found: {self.atlas_dir}. Cannot use 'fusion' method.")
+            if not self.labels_dir.exists():
+                self.logger.error(f"Labels directory not found: {self.labels_dir}")
+                raise ValueError(f"Labels directory not found: {self.labels_dir}. Cannot use 'fusion' method.")
                 
             # Get all atlas T1s and labels
             T1s = natsorted(glob.glob(str(self.atlas_dir / '*.nii.gz')))
             labels = natsorted(glob.glob(str(self.labels_dir / '*.nii.gz')))
             
-            if not T1s or not labels:
-                raise ValueError("No atlas images or labels found in package data directories")
+            if not T1s:
+                self.logger.error(f"No atlas T1 images found in {self.atlas_dir}")
+                self.logger.error(f"Directory contents: {list(self.atlas_dir.iterdir())[:5]}")
+                raise ValueError(f"No atlas T1 images found in {self.atlas_dir}")
+            if not labels:
+                self.logger.error(f"No label images found in {self.labels_dir}")
+                self.logger.error(f"Directory contents: {list(self.labels_dir.iterdir())[:5]}")
+                raise ValueError(f"No label images found in {self.labels_dir}")
+                
+            self.logger.info(f"Found {len(T1s)} atlas T1 images and {len(labels)} label images")
+            if len(T1s) != len(labels):
+                self.logger.warning(f"Number of atlas images ({len(T1s)}) does not match number of labels ({len(labels)})")
                 
             # Load atlas images and labels
             atlas_images = [ants.image_read(str(path)) for path in T1s]
@@ -356,7 +435,7 @@ class ANTsSegmentation:
                 warped_labels.append(warped_lab)
             
             # Perform joint label fusion
-            self.logger.info("Running joint label fusion")
+            self.logger.info(f"Running joint label fusion with {len(warped_images)} atlases")
             fusion = ants.joint_label_fusion(
                 target_image=masked_brain,
                 target_image_mask=thickness_results['BrainExtractionMask'],
@@ -469,7 +548,7 @@ class ANTsSegmentation:
             'segmentation': str(label_path)
         }
 
-    def save_results(self, segmentation, bids_subject, bids_session=None, output_dir=None):
+    def save_results(self, segmentation, bids_subject, bids_session=None, output_dir=None, input_t1w=None):
         """Save segmentation results in BIDS-compatible format and generate files for NIDM conversion.
         
         Parameters
@@ -482,6 +561,8 @@ class ANTsSegmentation:
             Session identifier
         output_dir : str or Path, optional
             Output directory (defaults to self.output_path)
+        input_t1w : str or Path, optional
+            Path to input T1w file used for segmentation
         """
         if output_dir:
             original_output = self.output_dir
@@ -490,6 +571,31 @@ class ANTsSegmentation:
         try:
             # Organize outputs in BIDS format
             volumes = self._organize_bids_output(segmentation, bids_subject, bids_session)
+            
+            # Add input T1w file information if provided
+            if input_t1w:
+                volumes['input_t1w'] = str(input_t1w)
+            
+            # Add template and atlas information
+            volumes['templates'] = {
+                'template_dir': str(self.template_dir),
+                'template_files': {
+                    'T_template': 'T_template0.nii.gz',
+                    'BrainCerebellum': 'T_template0_BrainCerebellum.nii.gz',
+                    'ProbabilityMask': 'T_template0_BrainCerebellumProbabilityMask.nii.gz',
+                    'ExtractionMask': 'T_template0_BrainCerebellumExtractionMask.nii.gz',
+                    'priors_dir': 'Priors2'
+                },
+                'template_description': 'OASIS-30 Atropos template'
+            }
+            
+            volumes['atlases'] = {
+                'atlas_dir': str(self.atlas_dir),
+                'labels_dir': str(self.labels_dir),
+                'template_labels': str(self.template_labels_path),
+                'atlas_description': 'OASIS-TRT-20 brains and DKT31 CMA labels'
+            }
+                
             self.logger.info("Segmentation results saved successfully")
             return volumes
         finally:
@@ -553,8 +659,8 @@ class ANTsSegmentation:
             if not segmentation:
                 return False
             
-            # Save results and get volumes
-            volumes = self.save_results(segmentation, bids_subject, bids_session)
+            # Save results and get volumes, passing the input T1w file path
+            volumes = self.save_results(segmentation, bids_subject, bids_session, input_t1w=str(input_file))
             
             # Log volume information
             if volumes:
@@ -683,9 +789,23 @@ class ANTsSegmentation:
         final_mask = ants.iMath(final_mask, "FillHoles")
         final_mask = ants.iMath(final_mask, "GetLargestComponent")
         
-        return {
+        # Prepare results dictionary
+        results = {
             'BrainSegmentationN4': n4_image,
-            'BrainExtractionMask': final_mask,
-            'TemplateToSubject1GenericAffine': transforms[0],
-            'TemplateToSubject0Warp': transforms[1] if len(transforms) > 1 else None
+            'BrainExtractionMask': final_mask
         }
+        
+        # Handle transforms based on what's available
+        if len(transforms) > 1:
+            results['TemplateToSubject1GenericAffine'] = transforms[0]
+            results['TemplateToSubject0Warp'] = transforms[1]
+        elif len(transforms) == 1:
+            # Only affine available
+            results['TemplateToSubject1GenericAffine'] = transforms[0]
+            results['TemplateToSubject0Warp'] = None
+        else:
+            # No transforms (shouldn't happen but handle gracefully)
+            results['TemplateToSubject1GenericAffine'] = None
+            results['TemplateToSubject0Warp'] = None
+            
+        return results

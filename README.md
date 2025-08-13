@@ -18,17 +18,9 @@ This BIDS App provides a standardized way to run ANTs-based brain segmentation o
 
 ## Installation
 
-### Using Docker
+### Container Images
 
-```bash
-docker pull repro/ants-bidsapp
-```
-
-### Using Singularity/Apptainer
-
-```bash
-singularity pull ants-bidsapp.sif docker://repro/ants-bidsapp
-```
+Pre-built images will be available once the app is published to Docker Hub. For now, please build from source (see below).
 
 ### From Source
 
@@ -40,27 +32,42 @@ pip install -e .
 
 ### Building Containers from Source
 
-You can build Docker and Singularity containers directly from the source code using the setup.py script:
+This BIDS App follows standard BIDS Apps practices with a Dockerfile as the primary container definition. For HPC environments without Docker, we also provide a native Singularity definition file.
+
+#### Building with Docker (on systems with Docker installed)
 
 ```bash
-# Build Docker container
+# Using the setup.py helper script
 python setup.py docker
 
-# Build Singularity container
-python setup.py singularity
+# Or directly with Docker
+docker build -t ants-bidsapp:latest .
 
-# Build both Docker and Singularity containers
-python setup.py containers
+# Save for transfer to HPC (if needed)
+docker save ants-bidsapp:latest -o ants-bidsapp.tar
 ```
 
-For Singularity builds on cluster environments, you may need to use the `--fakeroot` option:
+#### Building with Singularity/Apptainer (for HPC environments)
 
 ```bash
-# On a cluster with Apptainer
+# Direct build from Singularity definition file
+# The --fakeroot flag is required on HPC systems without root access
 apptainer build --fakeroot ants-bidsapp.sif Singularity
 
-# Or with Singularity
-singularity build --fakeroot ants-bidsapp.sif Singularity
+# Or using the setup.py helper
+python setup.py singularity
+```
+
+#### Converting Docker to Singularity
+
+If you have a Docker image (either built locally or from a tar file):
+
+```bash
+# From a saved Docker tar file
+singularity build ants-bidsapp.sif docker-archive://ants-bidsapp.tar
+
+# From local Docker daemon (requires Docker)
+singularity build ants-bidsapp.sif docker-daemon://ants-bidsapp:latest
 ```
 
 ## Usage

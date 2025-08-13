@@ -9,12 +9,44 @@ def build_docker():
     """Build Docker container"""
     print("Building Docker image...")
     try:
-        subprocess.run(["docker", "build", "-t", "ants-bidsapp", "."], check=True)
-        print("Docker image built successfully")
+        subprocess.run(["docker", "build", "-t", "ants-bidsapp:latest", "."], check=True)
+        print("Docker image built successfully: ants-bidsapp:latest")
     except subprocess.CalledProcessError as e:
         print(f"Docker build failed: {e}")
         return False
     return True
+
+
+def docker_to_singularity(docker_image="ants-bidsapp:latest", output_path=None):
+    """Convert Docker image to Singularity container"""
+    print(f"Converting Docker image {docker_image} to Singularity...")
+    
+    # Use custom output path if provided, otherwise use default
+    output_file = output_path if output_path else "ants-bidsapp.sif"
+    output_file = str(Path(output_file).resolve())
+    
+    try:
+        # Check for apptainer first, then singularity
+        if subprocess.run(["which", "apptainer"], capture_output=True).returncode == 0:
+            container_cmd = "apptainer"
+        elif subprocess.run(["which", "singularity"], capture_output=True).returncode == 0:
+            container_cmd = "singularity"
+        else:
+            print("Neither apptainer nor singularity found. Cannot convert Docker image.")
+            return False
+        
+        # Build from Docker daemon
+        cmd = [container_cmd, "build", output_file, f"docker-daemon://{docker_image}"]
+        
+        print(f"Running command: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+        print(f"Singularity image created successfully at: {output_file}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Docker to Singularity conversion failed: {e}")
+        print("\nYou can also try manual conversion:")
+        print(f"  docker save {docker_image} | singularity build {output_file} docker-archive:/dev/stdin")
+        return False
 
 
 def build_singularity(output_path=None):
@@ -86,11 +118,15 @@ def init_git_submodules():
 def print_usage():
     """Print usage information"""
     print("Usage:")
-    print("  python setup.py install          - Install the package")
-    print("  python setup.py docker          - Build Docker container")
-    print("  python setup.py singularity     - Build Singularity/Apptainer container")
-    print("  python setup.py containers      - Build both Docker and Singularity containers")
-    print("  python setup.py --init-git      - Initialize git submodules")
+    print("  python setup.py install          - Install the package locally")
+    print("\nContainer Build Commands (following BIDS Apps standards):")
+    print("  python setup.py docker           - Build Docker container (primary definition)")
+    print("  python setup.py singularity      - Build Singularity container from definition file")
+    print("  python setup.py docker2sing      - Convert existing Docker image to Singularity")
+    print("\nOther Commands:")
+    print("  python setup.py --init-git       - Initialize git submodules")
+    print("\nNote: For HPC environments without Docker, use 'singularity' command directly:")
+    print("  apptainer build --fakeroot ants-bidsapp.sif Singularity")
     print("\nFor more information, run: python setup.py --help")
 
 
@@ -141,22 +177,39 @@ install_requires = [
 ]
 
 # Check if we're being called with a container build command
-if len(sys.argv) > 1 and sys.argv[1] in ["docker", "singularity", "containers"]:
+if len(sys.argv) > 1 and sys.argv[1] in ["docker", "singularity", "docker2sing", "containers"]:
     command = sys.argv[1]
     # Remove the custom argument so setup() doesn't see it
     sys.argv.pop(1)
 
     if command == "docker":
-        build_docker()
+        success = build_docker()
+        sys.exit(0 if success else 1)
     elif command == "singularity":
         # Check for custom output path in the next argument
         output_path = None
         if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
             output_path = sys.argv.pop(1)
-        build_singularity(output_path)
+        success = build_singularity(output_path)
+        sys.exit(0 if success else 1)
+    elif command == "docker2sing":
+        # Check for custom output path in the next argument
+        output_path = None
+        if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+            output_path = sys.argv.pop(1)
+        success = docker_to_singularity(output_path=output_path)
+        sys.exit(0 if success else 1)
     elif command == "containers":
-        build_docker()
-        build_singularity()
+        # Build Docker first, then auto-convert to Singularity
+        print("Building Docker container first...")
+        docker_success = build_docker()
+        if docker_success:
+            print("\nAuto-converting Docker to Singularity...")
+            sing_success = docker_to_singularity()
+            sys.exit(0 if sing_success else 1)
+        else:
+            print("Docker build failed, skipping Singularity conversion")
+            sys.exit(1)
 
     # Exit if we were just building containers
     if len(sys.argv) == 1:
@@ -181,7 +234,7 @@ if "install" in sys.argv:
     print("  python -m pip install -e .")
 
 setup(
-    name="ants-bidsapp",
+    name="ants_bidsapp",
     version="0.1.0",
     description="BIDS App for ANTs Segmentation with NIDM Output",
     author="ReproNim",
@@ -189,7 +242,7 @@ setup(
     packages=find_namespace_packages(include=["src", "src.*"]),
     include_package_data=True,
     license="MIT",
-    url="https://github.com/ReproNim/ants-bidsapp",
+    url="https://github.com/ReproNim/ants_bidsapp",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
@@ -202,7 +255,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "ants-bidsapp=src.run:main",
+            "ants_bidsapp=src.run:main",
         ],
     },
     python_requires=">=3.9",

@@ -54,16 +54,44 @@ From: ubuntu:22.04
 
     # Download joint fusion labels
     wget -O OASIS-TRT-20_jointfusion_DKT31_CMA_labels_in_OASIS-30_v2.nii.gz "https://osf.io/download/nxg5t/"
+    
+    # Check and reorganize extracted directories
+    echo "Checking extracted data structure..."
+    
+    # Fix OASIS-TRT-20 brains if nested
+    if [ -d "OASIS-TRT-20_brains/OASIS-TRT-20_brains" ]; then
+        echo "Fixing nested OASIS-TRT-20_brains directory"
+        mv OASIS-TRT-20_brains/OASIS-TRT-20_brains/* OASIS-TRT-20_brains/
+        rmdir OASIS-TRT-20_brains/OASIS-TRT-20_brains
+    fi
+    
+    # Fix OASIS-TRT-20 labels if nested
+    if [ -d "OASIS-TRT-20_DKT31_CMA_labels_v2/OASIS-TRT-20_DKT31_CMA_labels_v2" ]; then
+        echo "Fixing nested OASIS-TRT-20_DKT31_CMA_labels_v2 directory"
+        mv OASIS-TRT-20_DKT31_CMA_labels_v2/OASIS-TRT-20_DKT31_CMA_labels_v2/* OASIS-TRT-20_DKT31_CMA_labels_v2/
+        rmdir OASIS-TRT-20_DKT31_CMA_labels_v2/OASIS-TRT-20_DKT31_CMA_labels_v2
+    fi
+    
+    # List contents to verify
+    echo "Data directory contents:"
+    ls -la /opt/data/
+    echo "Template directory contents:"
+    ls -la /opt/data/OASIS-30_Atropos_template/ | head -5
+    echo "Atlas directory contents:" 
+    ls -la /opt/data/OASIS-TRT-20_brains/ | head -5
+    echo "Labels directory contents:"
+    ls -la /opt/data/OASIS-TRT-20_DKT31_CMA_labels_v2/ | head -5
 
 %files
     ./src /opt/src
+    ./setup.py /opt/setup.py
     ./requirements.txt /opt/requirements.txt
 
 %post
     # Install Python dependencies
     cd /opt
     python3 -m pip install -r requirements.txt
-
+    python3 -m pip install -e .
     # Install ants_seg_to_nidm
     cd /opt/src/ants_seg_to_nidm
     python3 -m pip install -e .

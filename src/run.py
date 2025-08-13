@@ -15,7 +15,7 @@ import ants
 import pkg_resources
 
 # Import local modules
-from antspy.wrapper import ANTsSegmentation
+from src.antspy.wrapper import ANTsSegmentation
 
 def get_bids_version():
     """Get the version of the installed bids package."""
@@ -140,7 +140,7 @@ def initialize(args):
     
     return layout, segmenter, derivatives_dir, nidm_dir, temp_dir
 
-def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_session=None, verbose=False):
+def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_session=None, verbose=False, input_file=None):
     """Convert ANTs segmentation outputs to NIDM format.
     Args:
         logger: Logger instance
@@ -149,6 +149,7 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
         bids_subject (str): Subject label (without "sub-" prefix)
         bids_session (str): Session label (without "ses-" prefix)
         verbose (bool): Enable verbose output
+        input_file (str or Path): Path to the input T1w file
     Returns:
         bool: True if conversion succeeded, False otherwise
     """
@@ -197,6 +198,7 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
             "ants_seg_to_nidm.ants_seg_to_nidm.ants_seg_to_nidm",
             "-f", f"{label_stats},{brain_vols},{seg_path}",
             "-subjid", f"sub-{bids_subject}",
+            "-t1", str(input_file) if input_file else "N/A",  # Add the T1w file path
             "-o", nidm_file,
             "-j"  # Output in JSON-LD format
         ]
@@ -225,8 +227,8 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
         return False
 
 def process_participant(args, logger):
-    """Run the participant level analysis."""
-    logger.info("Starting participant level analysis")
+    """Run the participant level analysis for single-session datasets."""
+    logger.info("Starting participant level analysis (single-session dataset)")
     
     # Initialize app
     layout, segmenter, derivatives_dir, nidm_dir, temp_dir = initialize(args)
@@ -242,21 +244,34 @@ def process_participant(args, logger):
         logger.error(f"Subject {participant_label} not found in dataset")
         return 1
     
-    success = False  # Initialize success flag
+    # For participant level: process single session (no session folders expected)
+    session_label = None
+    bids_session = None
+    
+    logger.info(f"Processing single-session data for subject {participant_label}")
     
     # Process subject
-    if segmenter.run_subject(participant_label, method=args.method):
+    if segmenter.run_subject(participant_label, session_label, method=args.method):
         success = True
         
         # Convert segmentation to NIDM if requested
         if not args.skip_nidm:
-            success = success and nidm_conversion(
+            # Get input file path for NIDM conversion (single session)
+            input_path = layout.get(subject=bids_subject, suffix=args.modality, extension='nii.gz')
+            input_file = input_path[0].path if input_path else None
+            
+            success = nidm_conversion(
                 logger,
                 derivatives_dir,
                 nidm_dir,
                 bids_subject,  # Pass without "sub-" prefix
-                verbose=args.verbose
+                bids_session,  # None for single session
+                verbose=args.verbose,
+                input_file=input_file
             )
+    else:
+        success = False
+        logger.error(f"Segmentation failed for subject {participant_label}")
     
     logger.info(f"Participant level analysis complete. Processing {'succeeded' if success else 'failed'}")
     
@@ -267,8 +282,12 @@ def process_participant(args, logger):
     return 0 if success else 1
 
 def process_session(args, logger):
-    """Run the session level analysis."""
-    logger.info("Starting session level analysis")
+    """Run the session level analysis for multi-session datasets.
+    
+    Note: BABS schedules each session as a separate task, so this processes
+    ONE session per task execution.
+    """
+    logger.info("Starting session level analysis (multi-session dataset)")
     
     # Initialize app
     layout, segmenter, derivatives_dir, nidm_dir, temp_dir = initialize(args)
@@ -283,32 +302,47 @@ def process_session(args, logger):
     if bids_subject not in available_subjects:
         logger.error(f"Subject {participant_label} not found in dataset")
         return 1
-
-    # Validate that the session exists
-    available_sessions = layout.get_sessions(subject=bids_subject)
+    
+    # For session level: --session-label is required by BABS
+    if not args.session_label:
+        logger.error("--session-label is required for session level analysis")
+        return 1
+        
     session_label = args.session_label
     if not session_label.startswith('ses-'):
         session_label = f"ses-{session_label}"
-    
     bids_session = session_label[4:]  # Strip "ses-" for BIDS query
+    
+    # Validate session exists
+    available_sessions = layout.get_sessions(subject=bids_subject)
     if bids_session not in available_sessions:
         logger.error(f"Session {session_label} not found for subject {participant_label}")
         return 1
     
-    success = False  # Initialize success flag
+    logger.info(f"Processing session {session_label} for subject {participant_label}")
     
-    # Process session
+    # Process this specific session
     if segmenter.run_subject(participant_label, session_label, method=args.method):
         success = True
+        
+        # Convert segmentation to NIDM if requested
         if not args.skip_nidm:
-            success = success and nidm_conversion(
+            # Get input file path for NIDM conversion
+            input_path = layout.get(subject=bids_subject, session=bids_session, suffix=args.modality, extension='nii.gz')
+            input_file = input_path[0].path if input_path else None
+            
+            success = nidm_conversion(
                 logger,
                 derivatives_dir,
                 nidm_dir,
                 bids_subject,  # Pass without "sub-" prefix
-                bids_session,  # Pass without "ses-" prefix
-                args.verbose
+                bids_session,  # Pass session ID
+                verbose=args.verbose,
+                input_file=input_file
             )
+    else:
+        success = False
+        logger.error(f"Segmentation failed for session {session_label}")
     
     logger.info(f"Session level analysis complete. Processing {'succeeded' if success else 'failed'}")
     
@@ -317,6 +351,7 @@ def process_session(args, logger):
         shutil.rmtree(temp_dir)
     
     return 0 if success else 1
+
 
 def main():
     """Main function to coordinate the workflow."""
@@ -339,6 +374,9 @@ def main():
             return process_participant(args, logger)
         elif args.analysis_level == 'session':
             return process_session(args, logger)
+        else:
+            logger.error(f"Unsupported analysis level: {args.analysis_level}")
+            return 1
     except Exception as e:
         logger.error(f"Error in {args.analysis_level} level analysis: {str(e)}")
         return 1
