@@ -1,3 +1,4 @@
+import csv
 import os
 import tempfile
 import shutil
@@ -157,19 +158,27 @@ class TestANTsSegmentation(unittest.TestCase):
             self.assertTrue(brainvols_file.exists())
 
             # Verify labelstats.csv content
-            with open(labelstats_file, 'r') as f:
-                lines = f.readlines()
-                self.assertEqual(lines[0].strip(), "Label,Volume")
-                self.assertEqual(len(lines), 3)  # Header + 2 labels
+            with open(labelstats_file, newline='') as f:
+                reader = csv.DictReader(f)
+                self.assertEqual(reader.fieldnames, ["Label", "VolumeInVoxels", "Volume_mm3"])
+                rows = list(reader)
+                self.assertEqual(len(rows), 2)
+                volumes = {row["Label"]: int(float(row["VolumeInVoxels"])) for row in rows}
+                self.assertEqual(volumes["1"], 2)
+                self.assertEqual(volumes["2"], 3)
 
             # Verify brainvols.csv content
-            with open(brainvols_file, 'r') as f:
-                lines = f.readlines()
-                self.assertEqual(lines[0].strip(), "Name,Value")
-                self.assertTrue(any("BVOL" in line for line in lines))
-                self.assertTrue(any("CSFVOL" in line for line in lines))
-                self.assertTrue(any("GMVOL" in line for line in lines))
-                self.assertTrue(any("WMVOL" in line for line in lines))
+            with open(brainvols_file, newline='') as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames or []
+                self.assertTrue({"BVOL", "CSFVOL", "GMVOL", "WMVOL"}.issubset(set(fieldnames)))
+                rows = list(reader)
+                self.assertEqual(len(rows), 1)
+                row = rows[0]
+                self.assertIn("BVOL", row)
+                self.assertIn("CSFVOL", row)
+                self.assertIn("GMVOL", row)
+                self.assertIn("WMVOL", row)
 
             # Check that image_write was called for all images
             self.assertEqual(mock_write.call_count, 4)  # 1 segmentation + 3 probability maps
@@ -201,6 +210,20 @@ class TestANTsSegmentation(unittest.TestCase):
             # Check segmentation file naming
             seg_file = anat_dir / "sub-01_ses-01_space-orig_dseg.nii.gz"
             self.assertTrue(mock_write.call_args_list[0][0][1].endswith(str(seg_file)))
+
+            labelstats_file = stats_dir / "antslabelstats.csv"
+            brainvols_file = stats_dir / "antsbrainvols.csv"
+
+            self.assertTrue(labelstats_file.exists())
+            self.assertTrue(brainvols_file.exists())
+
+            with open(labelstats_file, newline='') as f:
+                reader = csv.DictReader(f)
+                self.assertEqual(reader.fieldnames, ["Label", "VolumeInVoxels", "Volume_mm3"])
+
+            with open(brainvols_file, newline='') as f:
+                reader = csv.DictReader(f)
+                self.assertIn("BVOL", reader.fieldnames)
 
     def test_save_results(self):
         """Test save_results method with output directory handling"""

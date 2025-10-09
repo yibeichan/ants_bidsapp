@@ -134,6 +134,14 @@ def install_antspyx():
     """Install ANTsPy using conda or pip"""
     print("Installing ANTsPy...")
     
+    # Short-circuit if ANTsPy is already present (common when requirements are pre-installed)
+    try:
+        import ants  # noqa: F401
+        print("ANTsPy already installed; skipping reinstall")
+        return True
+    except ImportError:
+        pass
+    
     # Try conda first
     if subprocess.run(["which", "conda"], capture_output=True).returncode == 0:
         print("Using conda to install ANTsPy...")

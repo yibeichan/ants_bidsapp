@@ -103,13 +103,22 @@ def initialize(args):
     Args:
         args: Command line arguments
     Returns:
-        tuple: (layout, segmenter, derivatives_dir, nidm_dir, temp_dir)
+        tuple: (layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir, temp_dir)
     """
+    # Normalize incoming paths from argparse to Path objects
+    args.bids_dir = Path(args.bids_dir)
+    args.output_dir = Path(args.output_dir)
     # Initialize BIDS Layout
-    layout = BIDSLayout(args.bids_dir, validate=not args.skip_bids_validation)
+    layout = BIDSLayout(str(args.bids_dir), validate=not args.skip_bids_validation)
     
+    nidm_input_dir = args.bids_dir.parent / "NIDM"
+    if nidm_input_dir.exists():
+        args.nidm_input_dir = nidm_input_dir
+    else:
+        args.nidm_input_dir = None
+        
     # Create output directories
-    output_dir = Path(args.output_dir) / 'ants_bidsapp'
+    output_dir = args.output_dir / 'ants_bidsapp'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create the output derivative directory with BIDS-compliant structure
@@ -138,15 +147,16 @@ def initialize(args):
     nidm_dir = output_dir / 'nidm'
     nidm_dir.mkdir(parents=True, exist_ok=True)
     
-    return layout, segmenter, derivatives_dir, nidm_dir, temp_dir
+    return layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir, temp_dir
 
-def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_session=None, verbose=False, input_file=None):
+def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_dir=None, bids_session=None, verbose=False, input_file=None):
     """Convert ANTs segmentation outputs to NIDM format.
     Args:
         logger: Logger instance
         derivatives_dir (str or Path): Path to ANTs derivatives directory
         nidm_dir (str or Path): Path to NIDM output directory
         bids_subject (str): Subject label (without "sub-" prefix)
+        nidm_input_dir (Path or None): Optional directory containing existing NIDM resources
         bids_session (str): Session label (without "ses-" prefix)
         verbose (bool): Enable verbose output
         input_file (str or Path): Path to the input T1w file
@@ -158,6 +168,14 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
         derivatives_dir = Path(derivatives_dir)
         nidm_dir = Path(nidm_dir)
         nidm_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if there's existing NIDM input data to incorporate
+        existing_nidm_file = None
+        if nidm_input_dir and nidm_input_dir.exists():
+            # Look for existing NIDM file (e.g., nidm.ttl)
+            nidm_ttl_file = nidm_input_dir / "nidm.ttl"
+            if nidm_ttl_file.exists():
+                existing_nidm_file = nidm_ttl_file
         
         # Define paths to segmentation outputs
         if bids_session is None:
@@ -206,6 +224,11 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, bids_sessio
         logger.info(f"Converting segmentation to NIDM for {log_prefix}")
         logger.info(f"Running command: {' '.join(cmd)}")
         
+        # Add existing NIDM file if available
+        if existing_nidm_file:
+            cmd.extend(["--nidm", str(existing_nidm_file)])
+            logger.info(f"Adding data to existing NIDM file: {existing_nidm_file}")
+
         # Run the command from the script's directory
         result = subprocess.run(
             cmd,
@@ -231,7 +254,7 @@ def process_participant(args, logger):
     logger.info("Starting participant level analysis (single-session dataset)")
     
     # Initialize app
-    layout, segmenter, derivatives_dir, nidm_dir, temp_dir = initialize(args)
+    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir, temp_dir = initialize(args)
     
     # Get subject to process
     available_subjects = layout.get_subjects()
@@ -261,13 +284,14 @@ def process_participant(args, logger):
             input_file = input_path[0].path if input_path else None
             
             success = nidm_conversion(
-                logger,
-                derivatives_dir,
-                nidm_dir,
-                bids_subject,  # Pass without "sub-" prefix
-                bids_session,  # None for single session
+                logger=logger,
+                derivatives_dir=derivatives_dir,
+                nidm_dir=nidm_dir,
+                bids_subject=bids_subject,
+                nidm_input_dir=nidm_input_dir,
+                bids_session=bids_session,
                 verbose=args.verbose,
-                input_file=input_file
+                input_file=input_file,
             )
     else:
         success = False
@@ -290,7 +314,7 @@ def process_session(args, logger):
     logger.info("Starting session level analysis (multi-session dataset)")
     
     # Initialize app
-    layout, segmenter, derivatives_dir, nidm_dir, temp_dir = initialize(args)
+    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir, temp_dir = initialize(args)
     
     # Get subject to process
     available_subjects = layout.get_subjects()
@@ -332,13 +356,14 @@ def process_session(args, logger):
             input_file = input_path[0].path if input_path else None
             
             success = nidm_conversion(
-                logger,
-                derivatives_dir,
-                nidm_dir,
-                bids_subject,  # Pass without "sub-" prefix
-                bids_session,  # Pass session ID
+                logger=logger,
+                derivatives_dir=derivatives_dir,
+                nidm_dir=nidm_dir,
+                bids_subject=bids_subject,
+                nidm_input_dir=nidm_input_dir,
+                bids_session=bids_session,
                 verbose=args.verbose,
-                input_file=input_file
+                input_file=input_file,
             )
     else:
         success = False

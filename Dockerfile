@@ -60,8 +60,10 @@ COPY setup.py /app/
 COPY src/ /app/src/
 COPY README.md /app/
 
-# Install the application
+# Install the application and NIDM conversion toolkit
 RUN pip3 install -e . && \
+    pip3 install -e src/ants_seg_to_nidm && \
+    pip3 install -r src/ants_seg_to_nidm/requirements.txt && \
     chmod -R 755 /app
 
 # Set environment variables

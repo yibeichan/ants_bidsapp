@@ -2,9 +2,11 @@
 import os
 import subprocess
 import logging
+import importlib
 import ants
 import nibabel as nib
 import numpy as np
+import pandas as pd
 from pathlib import Path
 import glob
 from natsort import natsorted
@@ -183,7 +185,8 @@ class ANTsSegmentation:
         """
         try:
             self.logger.info(f"Loading image: {image_path}")
-            img = ants.image_read(str(image_path))
+            ants_mod = importlib.import_module("ants")
+            img = ants_mod.image_read(str(image_path))
             if img is None:
                 self.logger.error(f"Failed to load image {image_path}")
                 return None
@@ -503,36 +506,45 @@ class ANTsSegmentation:
         # Calculate volumes and prepare stats
         labeled_image = segmentation['segmentation']
         labels = labeled_image.numpy()
-        voxel_volume = np.prod(labeled_image.spacing)
-        brain_volume = np.sum(labels > 0) * voxel_volume
-        
+        voxel_volume = float(np.prod(labeled_image.spacing))
+
+        label_values, label_counts = np.unique(labels.astype(np.int64), return_counts=True)
+        positive_mask = label_values > 0
+        label_values = label_values[positive_mask]
+        label_counts = label_counts[positive_mask]
+        label_volumes_mm3 = label_counts * voxel_volume
+
+        brain_volume = float(label_volumes_mm3.sum()) if label_volumes_mm3.size else 0.0
+
         # Generate antslabelstats.csv
         labelstats_file = stats_dir / "antslabelstats.csv"
-        with open(labelstats_file, 'w') as f:
-            f.write("Label,Volume\n")  # Header required by NIDM converter
-            unique_labels = np.unique(labels)
-            for label in unique_labels:
-                if label > 0:  # Skip background
-                    volume = np.sum(labels == label) * voxel_volume
-                    f.write(f"{int(label)},{volume:.2f}\n")
-        
+        label_df = pd.DataFrame({
+            "Label": label_values.astype(int),
+            "VolumeInVoxels": label_counts.astype(int),
+            "Volume_mm3": label_volumes_mm3.astype(float),
+        })
+        label_df.to_csv(labelstats_file, index=False)
+
         # Generate antsbrainvols.csv
+        brain_vol_data = {"BVOL": brain_volume}
+        tissue_volumes = {}
+
+        probability_images = segmentation.get('probabilityimages') or []
+        if len(probability_images) >= 3:
+            csf_vol = float(np.sum(probability_images[0].numpy() > self.prob_threshold) * voxel_volume)
+            gm_vol = float(np.sum(probability_images[1].numpy() > self.prob_threshold) * voxel_volume)
+            wm_vol = float(np.sum(probability_images[2].numpy() > self.prob_threshold) * voxel_volume)
+
+            tissue_volumes = {
+                "CSFVOL": csf_vol,
+                "GMVOL": gm_vol,
+                "WMVOL": wm_vol,
+            }
+            brain_vol_data.update(tissue_volumes)
+
         brainvols_file = stats_dir / "antsbrainvols.csv"
-        with open(brainvols_file, 'w') as f:
-            f.write("Name,Value\n")  # Header required by NIDM converter
-            f.write(f"BVOL,{brain_volume:.2f}\n")  # Brain volume required by NIDM converter
-            
-            # If we have tissue volumes from JointLabelFusion, add them
-            if 'probabilityimages' in segmentation and len(segmentation['probabilityimages']) >= 3:
-                # Calculate tissue volumes from probability maps
-                csf_vol = np.sum(segmentation['probabilityimages'][0].numpy() > self.prob_threshold) * voxel_volume
-                gm_vol = np.sum(segmentation['probabilityimages'][1].numpy() > self.prob_threshold) * voxel_volume
-                wm_vol = np.sum(segmentation['probabilityimages'][2].numpy() > self.prob_threshold) * voxel_volume
-                
-                f.write(f"CSFVOL,{csf_vol:.2f}\n")
-                f.write(f"GMVOL,{gm_vol:.2f}\n")
-                f.write(f"WMVOL,{wm_vol:.2f}\n")
-        
+        pd.DataFrame([brain_vol_data]).to_csv(brainvols_file, index=False)
+
         # Save probability maps if available
         if 'probabilityimages' in segmentation:
             for idx, prob_img in enumerate(segmentation['probabilityimages']):
@@ -541,12 +553,18 @@ class ANTsSegmentation:
                 ants.image_write(prob_img, str(prob_path))
         
         self.logger.info(f"Saved segmentation results for subject {bids_subject}")
-        return {
+        volume_info = {
             'brain_volume': brain_volume,
             'label_stats': str(labelstats_file),
             'brain_vols': str(brainvols_file),
-            'segmentation': str(label_path)
+            'segmentation': str(label_path),
+            'label_volumes': {int(lbl): float(vol) for lbl, vol in zip(label_values, label_volumes_mm3)},
         }
+
+        if tissue_volumes:
+            volume_info['tissue_volumes'] = tissue_volumes
+
+        return volume_info
 
     def save_results(self, segmentation, bids_subject, bids_session=None, output_dir=None, input_t1w=None):
         """Save segmentation results in BIDS-compatible format and generate files for NIDM conversion.
@@ -644,14 +662,9 @@ class ANTsSegmentation:
             input_file = input_file[0]
             self.logger.info(f"Processing {input_file}")
             
-            # Load image
-            try:
-                img = ants.image_read(str(input_file))
-                if img is None:
-                    self.logger.error(f"Failed to load image {input_file}")
-                    return False
-            except Exception as e:
-                self.logger.error(f"Failed to load image {input_file}: {str(e)}")
+            # Load image using helper to centralize error handling (and simplify testing)
+            img = self.load_image(str(input_file))
+            if img is None:
                 return False
             
             # Run segmentation
