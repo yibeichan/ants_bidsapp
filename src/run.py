@@ -213,7 +213,7 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
         # Construct the command to run ants_seg_to_nidm.py
         cmd = [
             "python", "-m",
-            "ants_seg_to_nidm.ants_seg_to_nidm.ants_seg_to_nidm",
+            "ants_seg_to_nidm.ants_seg_to_nidm",
             "-f", f"{label_stats},{brain_vols},{seg_path}",
             "-subjid", f"sub-{bids_subject}",
             "-t1", str(input_file) if input_file else "N/A",  # Add the T1w file path

@@ -509,10 +509,22 @@ class ANTsSegmentation:
         voxel_volume = float(np.prod(labeled_image.spacing))
 
         label_values, label_counts = np.unique(labels.astype(np.int64), return_counts=True)
-        positive_mask = label_values > 0
-        label_values = label_values[positive_mask]
-        label_counts = label_counts[positive_mask]
+        
+        # Filter out problematic labels:
+        # - 0: background
+        # - 21-23: FreeSurfer reference lines (spatial markers, not brain structures)
+        # - 75-76: Removed from FreeSurferColorLUT as duplicates of 4/43
+        # These are present in OASIS-TRT-20_DKT31_CMA_labels_v2 but should not be in stats
+        invalid_labels = [0, 21, 22, 23, 75, 76]
+        valid_mask = ~np.isin(label_values, invalid_labels)
+        label_values = label_values[valid_mask]
+        label_counts = label_counts[valid_mask]
         label_volumes_mm3 = label_counts * voxel_volume
+        
+        # Log info if reference line labels were filtered
+        filtered_ref_lines = [lbl for lbl in [21, 22, 23] if lbl in np.unique(labels.astype(np.int64))]
+        if filtered_ref_lines:
+            self.logger.info(f"Filtered FreeSurfer reference line labels from stats output: {filtered_ref_lines}")
 
         brain_volume = float(label_volumes_mm3.sum()) if label_volumes_mm3.size else 0.0
 
