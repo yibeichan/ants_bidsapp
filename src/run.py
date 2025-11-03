@@ -204,11 +204,18 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
                 logger.error(f"Required file not found: {file_path}")
                 return False
         
+        # If adding to existing NIDM file, output should be combined nidm.ttl
+        # Otherwise, output is subject-specific JSON-LD file
+        if existing_nidm_file:
+            nidm_output = nidm_dir / "nidm.ttl"
+        else:
+            nidm_output = nidm_file
+        
         # Convert all paths to strings for subprocess call
         label_stats = str(label_stats.absolute())
         brain_vols = str(brain_vols.absolute())
         seg_path = str(seg_path.absolute())
-        nidm_file = str(nidm_file.absolute())
+        nidm_output = str(nidm_output.absolute())
         
         # Construct the command to run ants_seg_to_nidm.py
         cmd = [
@@ -216,9 +223,7 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
             "ants_seg_to_nidm.ants_seg_to_nidm",
             "-f", f"{label_stats},{brain_vols},{seg_path}",
             "-subjid", f"sub-{bids_subject}",
-            "-t1", str(input_file) if input_file else "N/A",  # Add the T1w file path
-            "-o", nidm_file,
-            "-j"  # Output in JSON-LD format
+            "-o", nidm_output
         ]
         
         logger.info(f"Converting segmentation to NIDM for {log_prefix}")
@@ -226,8 +231,9 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
         
         # Add existing NIDM file if available
         if existing_nidm_file:
-            cmd.extend(["--nidm", str(existing_nidm_file)])
+            cmd.extend(["--nidm", str(existing_nidm_file), "--forcenidm"])
             logger.info(f"Adding data to existing NIDM file: {existing_nidm_file}")
+            logger.info(f"Combined NIDM will be written to: {nidm_output}")
 
         # Run the command from the script's directory
         result = subprocess.run(

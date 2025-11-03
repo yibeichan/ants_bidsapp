@@ -217,6 +217,16 @@ def main() -> int:
         )
 
     entry = entries[args.occurrence - 1]
+    
+    # Print the parsed log entry
+    print(f"\n{'='*70}")
+    print(f"PARSED LOG ENTRY (occurrence {args.occurrence} of {len(entries)}):")
+    print(f"{'='*70}")
+    print(f"Command: {entry['command']}")
+    if entry['nidm']:
+        print(f"NIDM file: {entry['nidm']}")
+    print(f"{'='*70}\n")
+    
     module_name, module_args = _split_command(entry["command"])
     replay_module = args.module or module_name
 
@@ -234,6 +244,20 @@ def main() -> int:
                 sanitized_args.insert(idx + 1, entry["nidm"])
         else:
             sanitized_args.extend(["--nidm", entry["nidm"]])
+        
+        # Fix output path: when adding to existing NIDM file, output should be nidm.ttl
+        # not the subject-specific JSON-LD file
+        if "-o" in sanitized_args:
+            o_idx = sanitized_args.index("-o")
+            if o_idx + 1 < len(sanitized_args):
+                old_output = Path(sanitized_args[o_idx + 1])
+                # If output was subject-specific JSON-LD, change to nidm.ttl
+                if old_output.name.endswith("_dseg.json-ld"):
+                    new_output = old_output.parent / "nidm.ttl"
+                    print(f"Correcting output path:")
+                    print(f"  Old: {old_output}")
+                    print(f"  New: {new_output}")
+                    sanitized_args[o_idx + 1] = str(new_output)
 
     if args.forcenidm and "--forcenidm" not in sanitized_args and "-forcenidm" not in sanitized_args:
         sanitized_args.append("--forcenidm")
