@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+data/
 # C extensions
 *.so
 
@@ -31,6 +32,7 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+AGENTS.md
 
 # Installer logs
 pip-log.txt
@@ -172,3 +174,13 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Claude Code guidance file
+CLAUDE.md
+
+# Container images
+*.sif
+*.simg
+
+# Internal documentation and team files
+internal/

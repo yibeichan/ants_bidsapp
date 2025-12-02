@@ -1,0 +1,43 @@
+name: nidm-test
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - setuptools
+  - wheel
+  - pip:
+      # Core NIDM dependencies
+      - pynidm>=4.2.3
+      - rdflib>=6.3.2
+      # rdflib-jsonld is deprecated - integrated into rdflib as of 6.0.0
+      - prov>=2.0.0
+      
+      # Data handling
+      - pandas>=2.2.3
+      - numpy>=1.20.0
+      - nibabel>=4.0.0
+      - pybids>=0.15.1
+      - xlrd>=2.0.1
+      
+      # Additional scientific computing (container doesn't specify these)
+      - scikit-learn>=1.7.2
+      - scipy>=1.15.3
+      - statsmodels>=0.14.5
+      
+      # ANTs dependencies (from main requirements.txt)
+      - antspyx
+      - natsort>=8.0.0
+      
+      # Utilities
+      - datalad>=1.2.2
+      - requests>=2.32.5
+      - click>=8.3.0
+      - tqdm>=4.67.1
+      
+      # AWS support
+      - awscli>=1.38.30
+      - boto3>=1.40.61
+      
+      # Local package installation (use after environment creation)
+      # pip install -e /path/to/ants_bidsapp/src/ants_seg_to_nidm
