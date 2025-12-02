@@ -7,8 +7,15 @@ from unittest.mock import patch, MagicMock, PropertyMock
 import sys
 from pathlib import Path
 import json
-import pkg_resources
 import numpy as np
+
+# Handle pkg_resources import (deprecated in Python 3.12+)
+try:
+    import pkg_resources
+except ModuleNotFoundError:
+    # Create a mock pkg_resources for testing purposes
+    pkg_resources = MagicMock()
+    pkg_resources.DistributionNotFound = type('DistributionNotFound', (Exception,), {})
 
 # Add the project root to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -76,6 +83,7 @@ sys.modules['ants'] = mock_ants
 sys.modules['numpy'] = np
 sys.modules['nibabel'] = MagicMock()
 sys.modules['bids'] = mock_bids
+sys.modules['pkg_resources'] = pkg_resources
 
 # Import after mocking
 from src.run import process_participant, process_session, main, nidm_conversion, get_bids_version, create_dataset_description
