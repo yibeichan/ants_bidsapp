@@ -67,15 +67,18 @@ mock_layout = MagicMock()
 mock_layout.get_subjects.return_value = ['01']
 mock_layout.get_sessions.return_value = ['01']
 
+# Mock bids module
+mock_bids = MagicMock()
+mock_bids.BIDSLayout = MagicMock(return_value=mock_layout)
+
 # Configure the mocks
 sys.modules['ants'] = mock_ants
 sys.modules['numpy'] = np
 sys.modules['nibabel'] = MagicMock()
+sys.modules['bids'] = mock_bids
 
-# Patch BIDSLayout
-with patch('bids.BIDSLayout') as MockBIDSLayout:
-    MockBIDSLayout.return_value = mock_layout
-    from src.run import process_participant, process_session, main, nidm_conversion, get_bids_version, create_dataset_description
+# Import after mocking
+from src.run import process_participant, process_session, main, nidm_conversion, get_bids_version, create_dataset_description
 
 class TestRun(unittest.TestCase):
     """Test cases for the run module"""
