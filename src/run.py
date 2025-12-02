@@ -225,7 +225,11 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
             "-subjid", f"sub-{bids_subject}",
             "-o", nidm_output
         ]
-        
+
+        # Add JSON-LD flag if output format is JSON-LD
+        if nidm_output.endswith('.json-ld'):
+            cmd.append("-j")
+
         logger.info(f"Converting segmentation to NIDM for {log_prefix}")
         logger.info(f"Running command: {' '.join(cmd)}")
         

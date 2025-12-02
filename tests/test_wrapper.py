@@ -138,7 +138,7 @@ class TestANTsSegmentation(unittest.TestCase):
             'probabilityimages': [mock_prob1, mock_prob2, mock_prob3]
         }
 
-        with patch('ants.image_write') as mock_write:
+        with patch('src.antspy.wrapper.ants.image_write') as mock_write:
             # Call the method
             result = self.segmenter._organize_bids_output(segmentation_results, "01")
 
@@ -195,7 +195,7 @@ class TestANTsSegmentation(unittest.TestCase):
             'probabilityimages': []
         }
 
-        with patch('ants.image_write') as mock_write:
+        with patch('src.antspy.wrapper.ants.image_write') as mock_write:
             # Call the method with session
             result = self.segmenter._organize_bids_output(segmentation_results, "01", "01")
 
