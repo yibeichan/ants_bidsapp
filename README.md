@@ -81,6 +81,7 @@ ants-bidsapp bids_dir output_dir participant --participant-label 01
 ### Advanced Options
 
 ```bash
+# Full pipeline with all options
 ants-bidsapp bids_dir output_dir participant \
   --participant-label 01 \
   --session-label pre \
@@ -90,28 +91,73 @@ ants-bidsapp bids_dir output_dir participant \
   --verbose
 ```
 
+### NIDM-Only Mode (Skip ANTs)
+
+If you have already run ANTs segmentation and only want to generate NIDM outputs:
+
+```bash
+# Run only NIDM conversion using existing ANTs results
+ants-bidsapp bids_dir output_dir participant \
+  --participant-label 01 \
+  --skip-ants \
+  --ants-input /path/to/existing/ants-seg \
+  --nidm-input /path/to/existing/nidm.ttl
+```
+
 ### Command-line Arguments
 
+**Required:**
 - `bids_dir`: Path to the BIDS dataset
 - `output_dir`: Path where outputs will be stored
-- `analysis_level`: Level of the analysis (participant)
-- `--participant-label`: Label(s) of the participant(s) to analyze
-- `--session-label`: Label(s) of the session(s) to analyze
+- `analysis_level`: Level of the analysis (`participant` or `session`)
+
+**Participant/Session Selection:**
+- `--participant-label`, `--participant_label`: Label of the participant to analyze (with or without "sub-" prefix)
+- `--session-label`, `--session_label`: Label of the session to analyze (with or without "ses-" prefix)
+
+**Processing Options:**
 - `--modality`: Imaging modality to process (default: T1w)
+- `--method`: Segmentation method - `quick` or `fusion` (default: fusion)
 - `--prob-threshold`: Probability threshold for binary mask creation (default: 0.5)
-- `--priors`: Paths to prior probability maps for segmentation
-- `--skip-nidm`: Skip NIDM conversion step
 - `--num-threads`: Number of threads to use for processing (default: 1)
-- `--verbose`: Print detailed logs
+
+**Skip Options:**
+- `--skip-nidm`: Skip NIDM conversion step (run ANTs only)
+- `--skip-ants`: Skip ANTs segmentation step (run NIDM only, requires `--ants-input`)
+- `--skip-bids-validation`: Skip BIDS validation step
+
+**Input Options (for NIDM-only mode):**
+- `--ants-input`: Path to existing ANTs segmentation derivatives (required if `--skip-ants`)
+- `--nidm-input`: Path to existing NIDM TTL file to update (optional)
+
+**Other:**
+- `-v`, `--verbose`: Print detailed logs
+- `--version`: Print version and exit
 
 ## Outputs
 
-The app generates the following outputs:
+The app generates the following output structure:
 
-- Segmentation results in BIDS-compatible format
-- Probability maps for each tissue class
-- Binary masks for each tissue class
-- NIDM-compatible outputs for reproducibility
+```
+output_dir/
+├── ants-seg/                                    # ANTs segmentation derivatives
+│   ├── dataset_description.json
+│   ├── anat/
+│   │   ├── sub-01_space-orig_dseg.nii.gz       # Segmentation labels
+│   │   └── sub-01_space-orig_label-*_probseg.nii.gz  # Probability maps
+│   └── stats/
+│       ├── antslabelstats.csv                   # Label statistics
+│       └── antsbrainvols.csv                    # Brain volume statistics
+├── nidm/                                        # NIDM outputs
+│   └── sub-01_nidm.json-ld                     # NIDM document (or nidm.ttl if updating existing)
+└── logs/                                        # Processing logs
+```
+
+Output files include:
+- **Segmentation results** in BIDS-derivatives format
+- **Probability maps** for each tissue class
+- **Statistics files** (CSV) for downstream analysis
+- **NIDM-compatible outputs** for reproducibility and data sharing
 
 ## NIDM Outputs
 

@@ -488,13 +488,11 @@ class ANTsSegmentation:
             Dictionary containing tissue and label volumes
         """
         # Set up directories
+        # Output directly to output_dir (no sub-* subfolder since BABS runs per-participant)
         session_part = f"_ses-{bids_session}" if bids_session else ""
-        bids_subject_dir = self.output_dir / f"sub-{bids_subject}"
-        if bids_session:
-            bids_subject_dir = bids_subject_dir / f"ses-{bids_session}"
-
-        anat_dir = bids_subject_dir / "anat"
-        stats_dir = bids_subject_dir / "stats"
+        
+        anat_dir = self.output_dir / "anat"
+        stats_dir = self.output_dir / "stats"
         anat_dir.mkdir(parents=True, exist_ok=True)
         stats_dir.mkdir(parents=True, exist_ok=True)
 
