@@ -141,21 +141,25 @@ def initialize(args):
         if legacy_nidm_file.exists():
             nidm_input_file = legacy_nidm_file
         
-    # Create output directory directly (no ants_bidsapp wrapper)
+    # Create output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Create ants_bidsapp directory for all outputs
+    ants_bidsapp_dir = args.output_dir / 'ants_bidsapp'
+    ants_bidsapp_dir.mkdir(parents=True, exist_ok=True)
+
     # Create the output derivative directory with BIDS-compliant structure
-    # Outputs go directly to output_dir/ants-seg/ and output_dir/nidm/
-    derivatives_dir = args.output_dir / 'ants-seg'
+    # Outputs go to output_dir/ants_bidsapp/ants-seg/ and output_dir/ants_bidsapp/nidm/
+    derivatives_dir = ants_bidsapp_dir / 'ants-seg'
     derivatives_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Create dataset_description.json
     create_dataset_description(derivatives_dir, '0.1.0')
-    
-    # Create temporary directory
-    temp_dir = args.output_dir / 'tmp'
+
+    # Create temporary directory under ants_bidsapp
+    temp_dir = ants_bidsapp_dir / 'tmp'
     temp_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Initialize segmentation with appropriate parameters (only if not skipping ANTs)
     segmenter = None
     if not args.skip_ants:
@@ -168,9 +172,9 @@ def initialize(args):
             num_threads=args.num_threads,
             verbose=args.verbose
         )
-    
-    # Create NIDM output directory
-    nidm_dir = args.output_dir / 'nidm'
+
+    # Create NIDM output directory under ants_bidsapp
+    nidm_dir = ants_bidsapp_dir / 'nidm'
     nidm_dir.mkdir(parents=True, exist_ok=True)
     
     # If we have an input NIDM file, copy it to the output directory
