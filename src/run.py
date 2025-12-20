@@ -119,7 +119,7 @@ def initialize(args):
     Args:
         args: Command line arguments
     Returns:
-        tuple: (layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file, temp_dir)
+        tuple: (layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file)
     """
     # Normalize incoming paths from argparse to Path objects
     args.bids_dir = Path(args.bids_dir)
@@ -156,17 +156,12 @@ def initialize(args):
     # Create dataset_description.json
     create_dataset_description(derivatives_dir, '0.1.0')
 
-    # Create temporary directory under ants_bidsapp
-    temp_dir = ants_bidsapp_dir / 'tmp'
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
     # Initialize segmentation with appropriate parameters (only if not skipping ANTs)
     segmenter = None
     if not args.skip_ants:
         segmenter = ANTsSegmentation(
             bids_dir=str(args.bids_dir),
             output_dir=str(derivatives_dir),
-            temp_dir=str(temp_dir),
             modality=args.modality,
             prob_threshold=args.prob_threshold,
             num_threads=args.num_threads,
@@ -183,7 +178,7 @@ def initialize(args):
         if not output_nidm_file.exists():
             shutil.copy2(nidm_input_file, output_nidm_file)
     
-    return layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file, temp_dir
+    return layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file
 
 def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_file=None, bids_session=None, verbose=False, input_file=None):
     """Convert ANTs segmentation outputs to NIDM format.
@@ -220,16 +215,20 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
         
         # Define paths to segmentation outputs
         # Files are directly under derivatives_dir (no sub-* folder since BABS runs per-participant)
-        if bids_session is None:
-            # Single session case - no sub-id subfolder
-            seg_path = derivatives_dir / "anat" / f"sub-{bids_subject}_space-orig_dseg.nii.gz"
-            stats_dir = derivatives_dir / "stats"
-            nidm_file = nidm_dir / f"sub-{bids_subject}_nidm.json-ld"
-        else:
-            # Multi-session case - no sub-id/ses-id subfolders
-            seg_path = derivatives_dir / "anat" / f"sub-{bids_subject}_ses-{bids_session}_space-orig_dseg.nii.gz"
-            stats_dir = derivatives_dir / "stats"
-            nidm_file = nidm_dir / f"sub-{bids_subject}_ses-{bids_session}_nidm.json-ld"
+        # Handle session-specific paths consistently
+        anat_dir = derivatives_dir / "anat"
+        seg_base = f"sub-{bids_subject}"
+        if bids_session:
+            seg_base += f"_ses-{bids_session}"
+            
+        seg_path = anat_dir / f"{seg_base}_space-orig_dseg.nii.gz"
+        stats_dir = derivatives_dir / "stats"
+        
+        # Construct NIDM output filename
+        nidm_base = f"sub-{bids_subject}"
+        if bids_session:
+            nidm_base += f"_ses-{bids_session}"
+        nidm_file = nidm_dir / f"{nidm_base}_nidm.json-ld"
             
         # Define paths to the statistics files
         label_stats = stats_dir / "antslabelstats.csv"
@@ -302,7 +301,7 @@ def process_participant(args, logger):
     logger.info("Starting participant level analysis (single-session dataset)")
     
     # Initialize app
-    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file, temp_dir = initialize(args)
+    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file = initialize(args)
     
     # Get subject to process
     available_subjects = layout.get_subjects()
@@ -359,10 +358,6 @@ def process_participant(args, logger):
     
     logger.info(f"Participant level analysis complete. Processing {'succeeded' if success else 'failed'}")
     
-    # Clean up temporary files
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    
     return 0 if success else 1
 
 def process_session(args, logger):
@@ -374,7 +369,7 @@ def process_session(args, logger):
     logger.info("Starting session level analysis (multi-session dataset)")
     
     # Initialize app
-    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file, temp_dir = initialize(args)
+    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file = initialize(args)
     
     # Get subject to process
     available_subjects = layout.get_subjects()
@@ -446,10 +441,6 @@ def process_session(args, logger):
         )
     
     logger.info(f"Session level analysis complete. Processing {'succeeded' if success else 'failed'}")
-    
-    # Clean up temporary files
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
     
     return 0 if success else 1
 

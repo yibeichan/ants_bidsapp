@@ -127,15 +127,14 @@ class TestRun(unittest.TestCase):
     def create_derivatives_structure(self):
         """Create a minimal derivatives structure for testing NIDM conversion"""
         derivatives_dir = os.path.join(self.output_dir, "ants_bidsapp", "ants-seg")
-        subject_dir = os.path.join(derivatives_dir, "sub-01")
-        anat_dir = os.path.join(subject_dir, "anat")
-        stats_dir = os.path.join(subject_dir, "stats")
+        anat_dir = os.path.join(derivatives_dir, "anat")
+        stats_dir = os.path.join(derivatives_dir, "stats")
         
         os.makedirs(anat_dir, exist_ok=True)
         os.makedirs(stats_dir, exist_ok=True)
         
         # Create required files
-        seg_file = os.path.join(anat_dir, "sub-01_space-orig_dseg.nii.gz")
+        seg_file = os.path.join(anat_dir, "sub-01_ses-01_space-orig_dseg.nii.gz")
         labelstats_file = os.path.join(stats_dir, "antslabelstats.csv")
         brainvols_file = os.path.join(stats_dir, "antsbrainvols.csv")
         
@@ -172,6 +171,7 @@ class TestRun(unittest.TestCase):
                 derivatives_dir,
                 nidm_dir,
                 "01",
+                bids_session="01",  # Pass session to match test file structure
                 verbose=True
             )
             
@@ -227,9 +227,11 @@ class TestRun(unittest.TestCase):
                 self.prob_threshold = 0.5
                 self.method = "quick"
                 self.skip_nidm = False
+                self.skip_ants = False
                 self.num_threads = 1
                 self.verbose = True
                 self.skip_bids_validation = True
+                self.nidm_input = None
         
         args = Args(self)
         
@@ -339,9 +341,11 @@ class TestRun(unittest.TestCase):
                 self.prob_threshold = 0.5
                 self.method = "quick"
                 self.skip_nidm = False
+                self.skip_ants = False
                 self.num_threads = 1
                 self.verbose = True
                 self.skip_bids_validation = True
+                self.nidm_input = None
         
         args = Args(self)
         

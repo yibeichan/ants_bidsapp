@@ -1,4 +1,3 @@
 [submodule "src/ants_seg_to_nidm"]
 	path = src/ants_seg_to_nidm
-	url = https://github.com/yibeichan/ants_seg_to_nidm.git
-	branch = feature/link-ants-acquisition
+	url = https://github.com/ReproNim/ants_seg_to_nidm.git
