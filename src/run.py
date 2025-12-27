@@ -231,7 +231,7 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
 
         # Construct NIDM output filename (flat structure, TTL format)
         nidm_base = seg_base
-        nidm_file = nidm_dir / f"{nidm_base}_nidm.ttl"
+        nidm_file = nidm_dir / f"{nidm_base}.ttl"
 
         # Define paths to the statistics files (with subject prefix)
         label_stats = stats_dir / f"{seg_base}_antslabelstats.csv"
@@ -265,6 +265,10 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
             "-subjid", f"sub-{bids_subject}",
             "-o", nidm_output_str
         ]
+
+        # Add session if available
+        if bids_session:
+            cmd.extend(["-session", f"ses-{bids_session}"])
 
         # Add JSON-LD flag if output format is JSON-LD
         if nidm_output_str.endswith('.json-ld'):
