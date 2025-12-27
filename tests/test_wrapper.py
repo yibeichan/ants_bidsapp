@@ -150,9 +150,9 @@ class TestANTsSegmentation(unittest.TestCase):
             self.assertTrue(anat_dir.exists())
             self.assertTrue(stats_dir.exists())
 
-            # Check stats files exist and have correct format
-            labelstats_file = stats_dir / "antslabelstats.csv"
-            brainvols_file = stats_dir / "antsbrainvols.csv"
+            # Check stats files exist and have correct format (with subject prefix)
+            labelstats_file = stats_dir / "sub-01_antslabelstats.csv"
+            brainvols_file = stats_dir / "sub-01_antsbrainvols.csv"
             
             self.assertTrue(labelstats_file.exists())
             self.assertTrue(brainvols_file.exists())
@@ -211,8 +211,9 @@ class TestANTsSegmentation(unittest.TestCase):
             seg_file = anat_dir / "sub-01_ses-01_space-orig_dseg.nii.gz"
             self.assertTrue(mock_write.call_args_list[0][0][1].endswith(str(seg_file)))
 
-            labelstats_file = stats_dir / "antslabelstats.csv"
-            brainvols_file = stats_dir / "antsbrainvols.csv"
+            # Check stats files with subject/session prefix
+            labelstats_file = stats_dir / "sub-01_ses-01_antslabelstats.csv"
+            brainvols_file = stats_dir / "sub-01_ses-01_antsbrainvols.csv"
 
             self.assertTrue(labelstats_file.exists())
             self.assertTrue(brainvols_file.exists())

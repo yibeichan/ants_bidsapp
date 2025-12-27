@@ -127,16 +127,18 @@ class TestRun(unittest.TestCase):
     def create_derivatives_structure(self):
         """Create a minimal derivatives structure for testing NIDM conversion"""
         derivatives_dir = os.path.join(self.output_dir, "ants_bidsapp", "ants-seg")
-        anat_dir = os.path.join(derivatives_dir, "anat")
-        stats_dir = os.path.join(derivatives_dir, "stats")
-        
+        # Create BIDS-compliant sub-*/ses-* directory structure
+        subject_dir = os.path.join(derivatives_dir, "sub-01", "ses-01")
+        anat_dir = os.path.join(subject_dir, "anat")
+        stats_dir = os.path.join(subject_dir, "stats")
+
         os.makedirs(anat_dir, exist_ok=True)
         os.makedirs(stats_dir, exist_ok=True)
-        
-        # Create required files
+
+        # Create required files with subject/session prefix
         seg_file = os.path.join(anat_dir, "sub-01_ses-01_space-orig_dseg.nii.gz")
-        labelstats_file = os.path.join(stats_dir, "antslabelstats.csv")
-        brainvols_file = os.path.join(stats_dir, "antsbrainvols.csv")
+        labelstats_file = os.path.join(stats_dir, "sub-01_ses-01_antslabelstats.csv")
+        brainvols_file = os.path.join(stats_dir, "sub-01_ses-01_antsbrainvols.csv")
         
         # Write dummy content
         with open(seg_file, 'wb') as f:
@@ -189,7 +191,8 @@ class TestRun(unittest.TestCase):
             # Verify required arguments are present
             self.assertIn("-f", cmd_args)
             self.assertIn("-subjid", cmd_args)
-            self.assertIn("-j", cmd_args)
+            # TTL format is default, so -j flag should NOT be present
+            self.assertNotIn("-j", cmd_args)
             
             # Verify file paths exist
             paths_str = [arg for arg in cmd_args if ".csv" in arg or ".nii.gz" in arg][0]
@@ -289,23 +292,30 @@ class TestRun(unittest.TestCase):
             
             # Configure the run_subject method
             def mock_run_subject(subject_id, session_label=None, method='fusion'):
-                # Create output directories
-                subject_dir = os.path.join(self.output_dir, 'ants_bidsapp', 'ants-seg', subject_id)
+                # Create BIDS-compliant output directories with sub-*/[ses-*]/ structure
+                # subject_id comes in as "sub-01", extract the label
+                bids_subject = subject_id.replace('sub-', '') if subject_id.startswith('sub-') else subject_id
+                seg_base = f"sub-{bids_subject}"
+                subject_dir = os.path.join(self.output_dir, 'ants_bidsapp', 'ants-seg', f'sub-{bids_subject}')
+                if session_label:
+                    subject_dir = os.path.join(subject_dir, f'ses-{session_label}')
+                    seg_base += f"_ses-{session_label}"
+
                 anat_dir = os.path.join(subject_dir, 'anat')
                 stats_dir = os.path.join(subject_dir, 'stats')
                 os.makedirs(anat_dir, exist_ok=True)
                 os.makedirs(stats_dir, exist_ok=True)
-                
-                # Create dummy stats files
-                with open(os.path.join(stats_dir, 'antslabelstats.csv'), 'w') as f:
+
+                # Create dummy stats files with subject prefix
+                with open(os.path.join(stats_dir, f'{seg_base}_antslabelstats.csv'), 'w') as f:
                     f.write("Label,Volume\n1,1000.0\n2,2000.0\n")
-                with open(os.path.join(stats_dir, 'antsbrainvols.csv'), 'w') as f:
+                with open(os.path.join(stats_dir, f'{seg_base}_antsbrainvols.csv'), 'w') as f:
                     f.write("Name,Value\nBVOL,3000.0\n")
-                
+
                 # Create dummy segmentation file
-                with open(os.path.join(anat_dir, f"{subject_id}_space-orig_dseg.nii.gz"), 'w') as f:
+                with open(os.path.join(anat_dir, f"{seg_base}_space-orig_dseg.nii.gz"), 'w') as f:
                     f.write("dummy segmentation")
-                    
+
                 return True
             
             mock_instance.run_subject.side_effect = mock_run_subject
@@ -404,37 +414,42 @@ class TestRun(unittest.TestCase):
             
             # Configure the run_subject method
             def mock_run_subject(subject_id, session_label=None, method='fusion'):
-                # Create output directories
-                subject_dir = os.path.join(self.output_dir, 'ants_bidsapp', 'ants-seg', subject_id)
+                # Create BIDS-compliant output directories with sub-*/[ses-*]/ structure
+                # subject_id comes in as "sub-01", session_label as "ses-01"
+                bids_subject = subject_id.replace('sub-', '') if subject_id.startswith('sub-') else subject_id
+                seg_base = f"sub-{bids_subject}"
+                subject_dir = os.path.join(self.output_dir, 'ants_bidsapp', 'ants-seg', f'sub-{bids_subject}')
                 if session_label:
-                    subject_dir = os.path.join(subject_dir, session_label)
+                    bids_session = session_label.replace('ses-', '') if session_label.startswith('ses-') else session_label
+                    subject_dir = os.path.join(subject_dir, f'ses-{bids_session}')
+                    seg_base += f"_ses-{bids_session}"
+
                 anat_dir = os.path.join(subject_dir, 'anat')
                 stats_dir = os.path.join(subject_dir, 'stats')
                 os.makedirs(anat_dir, exist_ok=True)
                 os.makedirs(stats_dir, exist_ok=True)
-                
-                # Create dummy stats files
-                with open(os.path.join(stats_dir, 'antslabelstats.csv'), 'w') as f:
+
+                # Create dummy stats files with subject prefix
+                with open(os.path.join(stats_dir, f'{seg_base}_antslabelstats.csv'), 'w') as f:
                     f.write("Label,Volume\n1,1000.0\n2,2000.0\n")
-                with open(os.path.join(stats_dir, 'antsbrainvols.csv'), 'w') as f:
+                with open(os.path.join(stats_dir, f'{seg_base}_antsbrainvols.csv'), 'w') as f:
                     f.write("Name,Value\nBVOL,3000.0\n")
-                
+
                 # Create dummy segmentation file
-                seg_name = f"{subject_id}_ses-{session_label}_space-orig_dseg.nii.gz" if session_label else f"{subject_id}_space-orig_dseg.nii.gz"
-                with open(os.path.join(anat_dir, seg_name), 'w') as f:
+                with open(os.path.join(anat_dir, f"{seg_base}_space-orig_dseg.nii.gz"), 'w') as f:
                     f.write("dummy segmentation")
-                    
+
                 return True
-            
+
             mock_instance.run_subject.side_effect = mock_run_subject
             mock_instance.segment_image.return_value = segmentation_results
-            
+
             # Configure NIDM mock
             mock_nidm.return_value = True
-            
+
             # Run processing
             result = process_session(args, self.logger)
-            
+
             # Verify results
             self.assertEqual(result, 0)
             mock_instance.run_subject.assert_called_once_with("sub-01", "ses-01", method="quick")
