@@ -214,25 +214,28 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
                 existing_nidm_file = nidm_input_file
         
         # Define paths to segmentation outputs
-        # Files are directly under derivatives_dir (no sub-* folder since BABS runs per-participant)
-        # Handle session-specific paths consistently
-        anat_dir = derivatives_dir / "anat"
+        # Files are under sub-*/[ses-*/]anat/ and sub-*/[ses-*/]stats/ for BIDS compliance
         seg_base = f"sub-{bids_subject}"
         if bids_session:
             seg_base += f"_ses-{bids_session}"
-            
-        seg_path = anat_dir / f"{seg_base}_space-orig_dseg.nii.gz"
-        stats_dir = derivatives_dir / "stats"
-        
-        # Construct NIDM output filename
-        nidm_base = f"sub-{bids_subject}"
+
+        # Build subject/session directory path
+        subject_dir = derivatives_dir / f"sub-{bids_subject}"
         if bids_session:
-            nidm_base += f"_ses-{bids_session}"
-        nidm_file = nidm_dir / f"{nidm_base}_nidm.json-ld"
-            
-        # Define paths to the statistics files
-        label_stats = stats_dir / "antslabelstats.csv"
-        brain_vols = stats_dir / "antsbrainvols.csv"
+            subject_dir = subject_dir / f"ses-{bids_session}"
+
+        anat_dir = subject_dir / "anat"
+        stats_dir = subject_dir / "stats"
+
+        seg_path = anat_dir / f"{seg_base}_space-orig_dseg.nii.gz"
+
+        # Construct NIDM output filename (flat structure, TTL format)
+        nidm_base = seg_base
+        nidm_file = nidm_dir / f"{nidm_base}_nidm.ttl"
+
+        # Define paths to the statistics files (with subject prefix)
+        label_stats = stats_dir / f"{seg_base}_antslabelstats.csv"
+        brain_vols = stats_dir / f"{seg_base}_antsbrainvols.csv"
         
         # Check if required files exist
         required_files = [seg_path, label_stats, brain_vols]
@@ -242,7 +245,7 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
                 return False
         
         # If adding to existing NIDM file, output should be combined nidm.ttl
-        # Otherwise, output is subject-specific JSON-LD file
+        # Otherwise, output is subject-specific TTL file
         if existing_nidm_file:
             nidm_output = nidm_dir / "nidm.ttl"
         else:
