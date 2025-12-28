@@ -25,8 +25,8 @@ Pre-built images will be available once the app is published to Docker Hub. For 
 ### From Source
 
 ```bash
-git clone https://github.com/ReproNim/ants-bidsapp.git
-cd ants-bidsapp
+git clone https://github.com/ReproNim/ants-nidm_bidsapp.git
+cd ants-nidm_bidsapp
 pip install -e .
 ```
 
@@ -41,10 +41,10 @@ This BIDS App follows standard BIDS Apps practices with a Dockerfile as the prim
 python setup.py docker
 
 # Or directly with Docker
-docker build -t ants-bidsapp:latest .
+docker build -t ants-nidm-bidsapp:latest .
 
 # Save for transfer to HPC (if needed)
-docker save ants-bidsapp:latest -o ants-bidsapp.tar
+docker save ants-nidm-bidsapp:latest -o ants-nidm-bidsapp.tar
 ```
 
 #### Building with Singularity/Apptainer (for HPC environments)
@@ -52,7 +52,7 @@ docker save ants-bidsapp:latest -o ants-bidsapp.tar
 ```bash
 # Direct build from Singularity definition file
 # The --fakeroot flag is required on HPC systems without root access
-apptainer build --fakeroot ants-bidsapp.sif Singularity
+apptainer build --fakeroot ants-nidm-bidsapp.sif Singularity
 
 # Or using the setup.py helper
 python setup.py singularity
@@ -64,10 +64,10 @@ If you have a Docker image (either built locally or from a tar file):
 
 ```bash
 # From a saved Docker tar file
-singularity build ants-bidsapp.sif docker-archive://ants-bidsapp.tar
+singularity build ants-nidm-bidsapp.sif docker-archive://ants-nidm-bidsapp.tar
 
 # From local Docker daemon (requires Docker)
-singularity build ants-bidsapp.sif docker-daemon://ants-bidsapp:latest
+singularity build ants-nidm-bidsapp.sif docker-daemon://ants-nidm-bidsapp:latest
 ```
 
 ## Usage
@@ -75,18 +75,19 @@ singularity build ants-bidsapp.sif docker-daemon://ants-bidsapp:latest
 ### Basic Usage
 
 ```bash
-ants-bidsapp bids_dir output_dir participant --participant-label 01
+ants-nidm-bidsapp bids_dir output_dir participant --participant-label 01
 ```
 
 ### Advanced Options
 
 ```bash
 # Full pipeline with all options
-ants-bidsapp bids_dir output_dir participant \
+ants-nidm-bidsapp bids_dir output_dir participant \
   --participant-label 01 \
   --session-label pre \
   --modality T1w \
   --prob-threshold 0.5 \
+  --nidm-input-dir /path/to/nidm/inputs \
   --num-threads 4 \
   --verbose
 ```
@@ -97,11 +98,11 @@ If you have already run ANTs segmentation and only want to generate NIDM outputs
 
 ```bash
 # Run only NIDM conversion using existing ANTs results
-ants-bidsapp bids_dir output_dir participant \
+ants-nidm-bidsapp bids_dir output_dir participant \
   --participant-label 01 \
   --skip-ants \
   --ants-input /path/to/existing/ants-seg \
-  --nidm-input /path/to/existing/nidm.ttl
+  --nidm-input-dir /path/to/nidm/inputs
 ```
 
 ### Command-line Arguments
@@ -128,7 +129,7 @@ ants-bidsapp bids_dir output_dir participant \
 
 **Input Options (for NIDM-only mode):**
 - `--ants-input`: Path to existing ANTs segmentation derivatives (required if `--skip-ants`)
-- `--nidm-input`: Path to existing NIDM TTL file to update (optional)
+- `--nidm-input-dir`: Directory containing existing NIDM files (optional). The app will search for files matching `sub-{id}/[ses-{session}/]sub-{id}[_ses-{session}].ttl` or fallback to `nidm.ttl`
 
 **Other:**
 - `-v`, `--verbose`: Print detailed logs
@@ -140,24 +141,33 @@ The app generates the following output structure:
 
 ```
 output_dir/
-├── ants-seg/                                    # ANTs segmentation derivatives
-│   ├── dataset_description.json
-│   ├── anat/
-│   │   ├── sub-01_space-orig_dseg.nii.gz       # Segmentation labels
-│   │   └── sub-01_space-orig_label-*_probseg.nii.gz  # Probability maps
-│   └── stats/
-│       ├── antslabelstats.csv                   # Label statistics
-│       └── antsbrainvols.csv                    # Brain volume statistics
-├── nidm/                                        # NIDM outputs
-│   └── sub-01_nidm.json-ld                     # NIDM document (or nidm.ttl if updating existing)
-└── logs/                                        # Processing logs
+├── ants-nidm_bidsapp/                          # Main BIDS App output directory
+│   ├── ants-seg/                               # ANTs segmentation derivatives
+│   │   ├── dataset_description.json
+│   │   └── sub-XX/
+│   │       ├── ses-YY/                         # For multi-session datasets
+│   │       │   ├── anat/
+│   │       │   │   ├── sub-XX_ses-YY_T1w_space-orig_dseg.nii.gz
+│   │       │   │   ├── sub-XX_ses-YY_T1w_BrainSegmentation.nii.gz
+│   │       │   │   └── sub-XX_ses-YY_T1w_BrainSegmentationPosteriors*.nii.gz
+│   │       │   └── stats/
+│   │       │       ├── sub-XX_ses-YY_antslabelstats.csv
+│   │       │       └── sub-XX_ses-YY_antsbrainvols.csv
+│   │       └── anat/, stats/                   # For single-session datasets (no ses-)
+│   └── nidm/                                   # NIDM outputs (flat structure)
+│       ├── dataset_description.json
+│       ├── sub-01_ses-baseline.ttl            # NIDM files (Turtle format)
+│       └── sub-02_ses-baseline.ttl
+└── logs/                                       # Processing logs
 ```
+
+**Note:** NIDM outputs use a **flat file structure** (all TTL files in one directory) rather than hierarchical subdirectories. This design choice simplifies file management and discovery. See CLAUDE.md for detailed rationale.
 
 Output files include:
 - **Segmentation results** in BIDS-derivatives format
 - **Probability maps** for each tissue class
 - **Statistics files** (CSV) for downstream analysis
-- **NIDM-compatible outputs** for reproducibility and data sharing
+- **NIDM-compatible outputs** (Turtle RDF format) for reproducibility and data sharing
 
 ## NIDM Outputs
 
@@ -180,5 +190,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 If you use this BIDS App in your research, please cite:
 
 ```
-ANTs BIDS App. ReproNim. https://github.com/ReproNim/ants-bidsapp
+ANTs NIDM BIDS App. ReproNim. https://github.com/ReproNim/ants-nidm_bidsapp
 ```

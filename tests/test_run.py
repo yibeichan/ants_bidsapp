@@ -126,7 +126,7 @@ class TestRun(unittest.TestCase):
 
     def create_derivatives_structure(self):
         """Create a minimal derivatives structure for testing NIDM conversion"""
-        derivatives_dir = os.path.join(self.output_dir, "ants_bidsapp", "ants-seg")
+        derivatives_dir = os.path.join(self.output_dir, "ants-nidm_bidsapp", "ants-seg")
         # Create BIDS-compliant sub-*/ses-* directory structure
         subject_dir = os.path.join(derivatives_dir, "sub-01", "ses-01")
         anat_dir = os.path.join(subject_dir, "anat")
@@ -156,7 +156,7 @@ class TestRun(unittest.TestCase):
         """Test NIDM conversion with proper file structure"""
         # Create derivatives structure
         derivatives_dir = self.create_derivatives_structure()
-        nidm_dir = os.path.join(self.output_dir, "ants_bidsapp", "nidm")
+        nidm_dir = os.path.join(self.output_dir, "ants-nidm_bidsapp", "nidm")
         os.makedirs(nidm_dir, exist_ok=True)
         
         # Run NIDM conversion
@@ -203,8 +203,8 @@ class TestRun(unittest.TestCase):
 
     def test_nidm_conversion_missing_files(self):
         """Test NIDM conversion with missing required files"""
-        derivatives_dir = os.path.join(self.output_dir, "ants_bidsapp", "ants-seg")
-        nidm_dir = os.path.join(self.output_dir, "ants_bidsapp", "nidm")
+        derivatives_dir = os.path.join(self.output_dir, "ants-nidm_bidsapp", "ants-seg")
+        nidm_dir = os.path.join(self.output_dir, "ants-nidm_bidsapp", "nidm")
         os.makedirs(derivatives_dir)
         
         result = nidm_conversion(
@@ -234,7 +234,7 @@ class TestRun(unittest.TestCase):
                 self.num_threads = 1
                 self.verbose = True
                 self.skip_bids_validation = True
-                self.nidm_input = None
+                self.nidm_input_dir = None
         
         args = Args(self)
         
@@ -296,7 +296,7 @@ class TestRun(unittest.TestCase):
                 # subject_id comes in as "sub-01", extract the label
                 bids_subject = subject_id.replace('sub-', '') if subject_id.startswith('sub-') else subject_id
                 seg_base = f"sub-{bids_subject}"
-                subject_dir = os.path.join(self.output_dir, 'ants_bidsapp', 'ants-seg', f'sub-{bids_subject}')
+                subject_dir = os.path.join(self.output_dir, 'ants-nidm_bidsapp', 'ants-seg', f'sub-{bids_subject}')
                 if session_label:
                     subject_dir = os.path.join(subject_dir, f'ses-{session_label}')
                     seg_base += f"_ses-{session_label}"
@@ -355,7 +355,7 @@ class TestRun(unittest.TestCase):
                 self.num_threads = 1
                 self.verbose = True
                 self.skip_bids_validation = True
-                self.nidm_input = None
+                self.nidm_input_dir = None
         
         args = Args(self)
         
@@ -418,7 +418,7 @@ class TestRun(unittest.TestCase):
                 # subject_id comes in as "sub-01", session_label as "ses-01"
                 bids_subject = subject_id.replace('sub-', '') if subject_id.startswith('sub-') else subject_id
                 seg_base = f"sub-{bids_subject}"
-                subject_dir = os.path.join(self.output_dir, 'ants_bidsapp', 'ants-seg', f'sub-{bids_subject}')
+                subject_dir = os.path.join(self.output_dir, 'ants-nidm_bidsapp', 'ants-seg', f'sub-{bids_subject}')
                 if session_label:
                     bids_session = session_label.replace('ses-', '') if session_label.startswith('ses-') else session_label
                     subject_dir = os.path.join(subject_dir, f'ses-{bids_session}')

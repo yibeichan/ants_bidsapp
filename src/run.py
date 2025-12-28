@@ -29,7 +29,7 @@ def setup_logger(log_dir, verbose=False):
     """Set up logging configuration."""
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_file = os.path.join(log_dir, f"ants_bidsapp-{timestamp}.log")
+    log_file = os.path.join(log_dir, f"ants-nidm_bidsapp-{timestamp}.log")
     
     # Configure logging
     log_level = logging.DEBUG if verbose else logging.INFO
@@ -41,7 +41,56 @@ def setup_logger(log_dir, verbose=False):
             logging.StreamHandler()
         ]
     )
-    return logging.getLogger('ants_bidsapp')
+    return logging.getLogger('ants-nidm_bidsapp')
+
+def find_nidm_input_file(nidm_input_dir, subject_id, session_id=None):
+    """Search for NIDM input file in standard locations.
+
+    Args:
+        nidm_input_dir (Path): Directory containing NIDM files
+        subject_id (str): Subject ID without 'sub-' prefix
+        session_id (str, optional): Session ID without 'ses-' prefix
+
+    Returns:
+        Path or None: Path to NIDM file if found, None otherwise
+    """
+    if nidm_input_dir is None:
+        return None
+
+    nidm_input_dir = Path(nidm_input_dir)
+
+    if not nidm_input_dir.exists():
+        return None
+
+    # Try subject/session hierarchical structure
+    if session_id:
+        # With sessions: sub-{id}/ses-{session}/sub-{id}_ses-{session}.ttl
+        hierarchical_path = nidm_input_dir / f"sub-{subject_id}" / f"ses-{session_id}" / f"sub-{subject_id}_ses-{session_id}.ttl"
+        if hierarchical_path.exists():
+            return hierarchical_path
+
+        # Try flat structure with session: sub-{id}_ses-{session}.ttl
+        flat_with_session = nidm_input_dir / f"sub-{subject_id}_ses-{session_id}.ttl"
+        if flat_with_session.exists():
+            return flat_with_session
+    else:
+        # Without sessions: sub-{id}/sub-{id}.ttl
+        hierarchical_path = nidm_input_dir / f"sub-{subject_id}" / f"sub-{subject_id}.ttl"
+        if hierarchical_path.exists():
+            return hierarchical_path
+
+        # Try flat structure without session: sub-{id}.ttl
+        flat_without_session = nidm_input_dir / f"sub-{subject_id}.ttl"
+        if flat_without_session.exists():
+            return flat_without_session
+
+    # Fallback to generic nidm.ttl at directory root
+    fallback_path = nidm_input_dir / "nidm.ttl"
+    if fallback_path.exists():
+        return fallback_path
+
+    return None
+
 
 def create_dataset_description(output_dir, app_version):
     """Create a dataset_description.json file in the output directory."""
@@ -53,7 +102,7 @@ def create_dataset_description(output_dir, app_version):
             {
                 "Name": "ANTs BIDS App",
                 "Version": app_version,
-                "CodeURL": "https://github.com/ReproNim/ants_bidsapp"
+                "CodeURL": "https://github.com/ReproNim/ants-nidm_bidsapp"
             }
         ],
         "HowToAcknowledge": "Please cite the ANTs segmentation tool and the NIDM standard in your publications."
@@ -96,7 +145,7 @@ def parse_arguments():
                         action='store_true')
     parser.add_argument('--ants-input', help='Path to existing ANTs segmentation derivatives. Required if --skip-ants is set.',
                         type=str, default=None)
-    parser.add_argument('--nidm-input', help='Path to existing NIDM TTL file to update (will be copied to output before updating).',
+    parser.add_argument('--nidm-input-dir', help='Directory containing existing NIDM files. Files will be searched in standard BIDS structure: sub-{id}/[ses-{session}/]sub-{id}[_ses-{session}].ttl or fallback to nidm.ttl. Defaults to <bids_dir>/../NIDM for BABS workflows.',
                         type=str, default=None)
     
     parser.add_argument('--num-threads', help='Number of threads to use for processing [default: 1]',
@@ -119,38 +168,35 @@ def initialize(args):
     Args:
         args: Command line arguments
     Returns:
-        tuple: (layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file)
+        tuple: (layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir)
     """
     # Normalize incoming paths from argparse to Path objects
     args.bids_dir = Path(args.bids_dir)
     args.output_dir = Path(args.output_dir)
-    
+
     # Initialize BIDS Layout
     layout = BIDSLayout(str(args.bids_dir), validate=not args.skip_bids_validation)
-    
-    # Handle NIDM input file - prioritize command line argument over default location
-    nidm_input_file = None
-    if args.nidm_input:
-        nidm_input_file = Path(args.nidm_input)
-        if not nidm_input_file.exists():
-            raise FileNotFoundError(f"NIDM input file not found: {nidm_input_file}")
+
+    # Handle NIDM input directory
+    # Use CLI argument if provided, otherwise default to BABS location
+    if args.nidm_input_dir is None:
+        nidm_input_dir = args.bids_dir.parent / "NIDM"
     else:
-        # Legacy fallback: check default location in parent NIDM folder
-        legacy_nidm_dir = args.bids_dir.parent / "NIDM"
-        legacy_nidm_file = legacy_nidm_dir / "nidm.ttl"
-        if legacy_nidm_file.exists():
-            nidm_input_file = legacy_nidm_file
+        nidm_input_dir = Path(args.nidm_input_dir)
+
+    if not nidm_input_dir.exists():
+        nidm_input_dir = None
         
     # Create output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create ants_bidsapp directory for all outputs
-    ants_bidsapp_dir = args.output_dir / 'ants_bidsapp'
-    ants_bidsapp_dir.mkdir(parents=True, exist_ok=True)
+    # Create ants-nidm_bidsapp directory for all outputs
+    ants_nidm_bidsapp_dir = args.output_dir / 'ants-nidm_bidsapp'
+    ants_nidm_bidsapp_dir.mkdir(parents=True, exist_ok=True)
 
     # Create the output derivative directory with BIDS-compliant structure
-    # Outputs go to output_dir/ants_bidsapp/ants-seg/ and output_dir/ants_bidsapp/nidm/
-    derivatives_dir = ants_bidsapp_dir / 'ants-seg'
+    # Outputs go to output_dir/ants-nidm_bidsapp/ants-seg/ and output_dir/ants-nidm_bidsapp/nidm/
+    derivatives_dir = ants_nidm_bidsapp_dir / 'ants-seg'
     derivatives_dir.mkdir(parents=True, exist_ok=True)
 
     # Create dataset_description.json
@@ -168,17 +214,11 @@ def initialize(args):
             verbose=args.verbose
         )
 
-    # Create NIDM output directory under ants_bidsapp
-    nidm_dir = ants_bidsapp_dir / 'nidm'
+    # Create NIDM output directory under ants-nidm_bidsapp
+    nidm_dir = ants_nidm_bidsapp_dir / 'nidm'
     nidm_dir.mkdir(parents=True, exist_ok=True)
-    
-    # If we have an input NIDM file, copy it to the output directory
-    if nidm_input_file:
-        output_nidm_file = nidm_dir / nidm_input_file.name
-        if not output_nidm_file.exists():
-            shutil.copy2(nidm_input_file, output_nidm_file)
-    
-    return layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file
+
+    return layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir
 
 def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_file=None, bids_session=None, verbose=False, input_file=None):
     """Convert ANTs segmentation outputs to NIDM format.
@@ -202,15 +242,15 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
         nidm_dir = Path(nidm_dir)
         nidm_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check for existing NIDM file in output directory (may have been copied from input)
+        # Check for existing NIDM file
         existing_nidm_file = None
         if nidm_input_file:
-            # The input file should have been copied to nidm_dir during initialize()
+            # Check if a previous run already created output in nidm_dir
             copied_nidm_file = nidm_dir / nidm_input_file.name
             if copied_nidm_file.exists():
                 existing_nidm_file = copied_nidm_file
             elif nidm_input_file.exists():
-                # Fallback to original if copy didn't happen
+                # Use the original input file found by find_nidm_input_file()
                 existing_nidm_file = nidm_input_file
         
         # Define paths to segmentation outputs
@@ -306,9 +346,9 @@ def nidm_conversion(logger, derivatives_dir, nidm_dir, bids_subject, nidm_input_
 def process_participant(args, logger):
     """Run the participant level analysis for single-session datasets."""
     logger.info("Starting participant level analysis (single-session dataset)")
-    
+
     # Initialize app
-    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file = initialize(args)
+    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir = initialize(args)
     
     # Get subject to process
     available_subjects = layout.get_subjects()
@@ -348,10 +388,15 @@ def process_participant(args, logger):
     
     # Convert segmentation to NIDM if requested and segmentation succeeded (or skipped)
     if success and not args.skip_nidm:
+        # Find NIDM input file for this subject (no session for participant level)
+        nidm_input_file = find_nidm_input_file(nidm_input_dir, bids_subject, session_id=None)
+        if nidm_input_file:
+            logger.info(f"Found NIDM input file: {nidm_input_file}")
+
         # Get input file path for NIDM conversion (single session)
         input_path = layout.get(subject=bids_subject, suffix=args.modality, extension='nii.gz')
         input_file = input_path[0].path if input_path else None
-        
+
         success = nidm_conversion(
             logger=logger,
             derivatives_dir=derivatives_dir,
@@ -369,14 +414,14 @@ def process_participant(args, logger):
 
 def process_session(args, logger):
     """Run the session level analysis for multi-session datasets.
-    
+
     Note: BABS schedules each session as a separate task, so this processes
     ONE session per task execution.
     """
     logger.info("Starting session level analysis (multi-session dataset)")
-    
+
     # Initialize app
-    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_file = initialize(args)
+    layout, segmenter, derivatives_dir, nidm_dir, nidm_input_dir = initialize(args)
     
     # Get subject to process
     available_subjects = layout.get_subjects()
@@ -432,10 +477,15 @@ def process_session(args, logger):
     
     # Convert segmentation to NIDM if requested and segmentation succeeded (or skipped)
     if success and not args.skip_nidm:
+        # Find NIDM input file for this subject and session
+        nidm_input_file = find_nidm_input_file(nidm_input_dir, bids_subject, session_id=bids_session)
+        if nidm_input_file:
+            logger.info(f"Found NIDM input file: {nidm_input_file}")
+
         # Get input file path for NIDM conversion
         input_path = layout.get(subject=bids_subject, session=bids_session, suffix=args.modality, extension='nii.gz')
         input_file = input_path[0].path if input_path else None
-        
+
         success = nidm_conversion(
             logger=logger,
             derivatives_dir=derivatives_dir,

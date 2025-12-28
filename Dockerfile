@@ -78,7 +78,7 @@ ENV TEMP=/work
 ENV TMP=/work
 
 # Create entrypoint script with proper permissions
-RUN echo '#!/bin/bash\nexec ants-bidsapp "$@"' > /entrypoint.sh && \
+RUN echo '#!/bin/bash\nexec ants-nidm-bidsapp "$@"' > /entrypoint.sh && \
     chmod 755 /entrypoint.sh
 
 # Ensure all installed binaries are executable
