@@ -99,7 +99,7 @@ class ANTsSegmentation:
         self.verbose = verbose
         
         # Set up logging
-        self.logger = logging.getLogger('ants_bidsapp.segmentation')
+        self.logger = logging.getLogger('ants-nidm.segmentation')
         
         # Validate required directories
         if not self.bids_dir or not self.bids_dir.exists():

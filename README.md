@@ -41,10 +41,10 @@ This BIDS App follows standard BIDS Apps practices with a Dockerfile as the prim
 python setup.py docker
 
 # Or directly with Docker
-docker build -t ants-nidm-bidsapp:latest .
+docker build -t ants-nidm_bidsapp:latest .
 
 # Save for transfer to HPC (if needed)
-docker save ants-nidm-bidsapp:latest -o ants-nidm-bidsapp.tar
+docker save ants-nidm_bidsapp:latest -o ants-nidm_bidsapp.tar
 ```
 
 #### Building with Singularity/Apptainer (for HPC environments)
@@ -52,7 +52,7 @@ docker save ants-nidm-bidsapp:latest -o ants-nidm-bidsapp.tar
 ```bash
 # Direct build from Singularity definition file
 # The --fakeroot flag is required on HPC systems without root access
-apptainer build --fakeroot ants-nidm-bidsapp.sif Singularity
+apptainer build --fakeroot ants-nidm_bidsapp.sif Singularity
 
 # Or using the setup.py helper
 python setup.py singularity
@@ -64,10 +64,10 @@ If you have a Docker image (either built locally or from a tar file):
 
 ```bash
 # From a saved Docker tar file
-singularity build ants-nidm-bidsapp.sif docker-archive://ants-nidm-bidsapp.tar
+singularity build ants-nidm_bidsapp.sif docker-archive://ants-nidm_bidsapp.tar
 
 # From local Docker daemon (requires Docker)
-singularity build ants-nidm-bidsapp.sif docker-daemon://ants-nidm-bidsapp:latest
+singularity build ants-nidm_bidsapp.sif docker-daemon://ants-nidm_bidsapp:latest
 ```
 
 ## Usage
@@ -75,14 +75,14 @@ singularity build ants-nidm-bidsapp.sif docker-daemon://ants-nidm-bidsapp:latest
 ### Basic Usage
 
 ```bash
-ants-nidm-bidsapp bids_dir output_dir participant --participant-label 01
+ants-nidm bids_dir output_dir participant --participant-label 01
 ```
 
 ### Advanced Options
 
 ```bash
 # Full pipeline with all options
-ants-nidm-bidsapp bids_dir output_dir participant \
+ants-nidm bids_dir output_dir participant \
   --participant-label 01 \
   --session-label pre \
   --modality T1w \
@@ -98,7 +98,7 @@ If you have already run ANTs segmentation and only want to generate NIDM outputs
 
 ```bash
 # Run only NIDM conversion using existing ANTs results
-ants-nidm-bidsapp bids_dir output_dir participant \
+ants-nidm bids_dir output_dir participant \
   --participant-label 01 \
   --skip-ants \
   --ants-input /path/to/existing/ants-seg \

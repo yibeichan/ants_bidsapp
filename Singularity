@@ -130,4 +130,4 @@ From: ubuntu:22.04
       singularity run [container] [input_dir] [output_dir] participant [options]
 
     Example:
-      singularity run ants-nidm-bidsapp.sif $PWD/inputs/data/BIDS $PWD/outputs/ants participant --participant-label 01 02 03 --session-label 01 --modality T1w
+      singularity run ants-nidm_bidsapp.sif $PWD/inputs/data/BIDS $PWD/outputs/ants participant --participant-label 01 02 03 --session-label 01 --modality T1w

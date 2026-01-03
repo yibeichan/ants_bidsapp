@@ -29,7 +29,7 @@ def setup_logger(log_dir, verbose=False):
     """Set up logging configuration."""
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_file = os.path.join(log_dir, f"ants-nidm_bidsapp-{timestamp}.log")
+    log_file = os.path.join(log_dir, f"ants-nidm-{timestamp}.log")
     
     # Configure logging
     log_level = logging.DEBUG if verbose else logging.INFO
@@ -41,7 +41,7 @@ def setup_logger(log_dir, verbose=False):
             logging.StreamHandler()
         ]
     )
-    return logging.getLogger('ants-nidm_bidsapp')
+    return logging.getLogger('ants-nidm')
 
 def find_nidm_input_file(nidm_input_dir, subject_id, session_id=None):
     """Search for NIDM input file in standard locations.

@@ -22,7 +22,7 @@ examples/
 To run the ANTs BIDS App on this example data:
 
 ```bash
-ants-bidsapp examples output participant --participant-label 01 02
+ants-nidm examples output participant --participant-label 01 02
 ```
 
 ## Note
