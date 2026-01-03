@@ -5,24 +5,31 @@ from pathlib import Path
 from setuptools import setup, find_namespace_packages
 
 
+# Container image constants - single source of truth for image names
+DOCKER_IMAGE_NAME = "ants-nidm_bidsapp"
+DOCKER_IMAGE_TAG = "latest"
+DOCKER_IMAGE = f"{DOCKER_IMAGE_NAME}:{DOCKER_IMAGE_TAG}"
+SINGULARITY_IMAGE_NAME = f"{DOCKER_IMAGE_NAME}.sif"
+
+
 def build_docker():
     """Build Docker container"""
     print("Building Docker image...")
     try:
-        subprocess.run(["docker", "build", "-t", "ants-nidm_bidsapp:latest", "."], check=True)
-        print("Docker image built successfully: ants-nidm_bidsapp:latest")
+        subprocess.run(["docker", "build", "-t", DOCKER_IMAGE, "."], check=True)
+        print(f"Docker image built successfully: {DOCKER_IMAGE}")
     except subprocess.CalledProcessError as e:
         print(f"Docker build failed: {e}")
         return False
     return True
 
 
-def docker_to_singularity(docker_image="ants-nidm_bidsapp:latest", output_path=None):
+def docker_to_singularity(docker_image=DOCKER_IMAGE, output_path=None):
     """Convert Docker image to Singularity container"""
     print(f"Converting Docker image {docker_image} to Singularity...")
 
     # Use custom output path if provided, otherwise use default
-    output_file = output_path if output_path else "ants-nidm_bidsapp.sif"
+    output_file = output_path if output_path else SINGULARITY_IMAGE_NAME
     output_file = str(Path(output_file).resolve())
     
     try:
@@ -59,7 +66,7 @@ def build_singularity(output_path=None):
         ):
             print("\nDetected Apptainer on cluster environment.")
             print("For cluster environments, please build directly with apptainer:")
-            print("apptainer build --fakeroot ants-nidm_bidsapp.sif Singularity\n")
+            print(f"apptainer build --fakeroot {SINGULARITY_IMAGE_NAME} Singularity\n")
             return False
         elif (
             subprocess.run(["which", "singularity"], capture_output=True).returncode == 0
@@ -70,7 +77,7 @@ def build_singularity(output_path=None):
             return False
 
         # Use custom output path if provided, otherwise use default
-        output_file = output_path if output_path else "ants-nidm_bidsapp.sif"
+        output_file = output_path if output_path else SINGULARITY_IMAGE_NAME
         output_file = str(Path(output_file).resolve())
         
         # Build command
@@ -92,9 +99,9 @@ def build_singularity(output_path=None):
     except subprocess.CalledProcessError as e:
         print(f"Build failed: {e}")
         print("\nFor cluster environments, please build directly with apptainer:")
-        print("apptainer build --remote ants-nidm_bidsapp.sif Singularity")
+        print(f"apptainer build --remote {SINGULARITY_IMAGE_NAME} Singularity")
         print("or")
-        print("apptainer build --fakeroot ants-nidm_bidsapp.sif Singularity")
+        print(f"apptainer build --fakeroot {SINGULARITY_IMAGE_NAME} Singularity")
         return False
 
 
@@ -126,7 +133,7 @@ def print_usage():
     print("\nOther Commands:")
     print("  python setup.py --init-git       - Initialize git submodules")
     print("\nNote: For HPC environments without Docker, use 'singularity' command directly:")
-    print("  apptainer build --fakeroot ants-nidm_bidsapp.sif Singularity")
+    print(f"  apptainer build --fakeroot {SINGULARITY_IMAGE_NAME} Singularity")
     print("\nFor more information, run: python setup.py --help")
 
 
