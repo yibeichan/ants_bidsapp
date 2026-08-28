@@ -97,6 +97,15 @@ class ANTsSegmentation:
         self.prob_threshold = prob_threshold
         self.num_threads = num_threads
         self.verbose = verbose
+
+        # ANTsPy takes no threads argument: every ITK filter it calls reads
+        # ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS from the environment. The
+        # container pins that to 1 so an unconfigured run cannot oversubscribe a
+        # shared node, which meant --num-threads was accepted and then ignored --
+        # joint label fusion registers 20 atlases and is unusably slow at one
+        # thread. Set it here so --num-threads actually takes effect.
+        if self.num_threads and self.num_threads > 0:
+            os.environ["ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS"] = str(self.num_threads)
         
         # Set up logging
         self.logger = logging.getLogger('ants-nidm.segmentation')
@@ -347,28 +356,19 @@ class ANTsSegmentation:
                 
             template_labels = ants.image_read(str(self.template_labels_path))
             
-            # Apply template-to-subject transforms to labels
-            # Build transform list based on what's available
-            transformlist = []
-            whichtoinvert = []
-            
-            if thickness_results.get('TemplateToSubject1GenericAffine'):
-                transformlist.append(thickness_results['TemplateToSubject1GenericAffine'])
-                whichtoinvert.append(False)
-                
-            if thickness_results.get('TemplateToSubject0Warp'):
-                transformlist.append(thickness_results['TemplateToSubject0Warp'])
-                whichtoinvert.append(False)
-                
+            # Apply template-to-subject transforms to the label atlas. As above,
+            # whichtoinvert is left unset so ANTsPy infers it from the transform
+            # shapes; the previous code hardcoded False for every element, which
+            # is wrong for the affine in an invtransforms list.
+            transformlist = thickness_results.get('TemplateToSubjectTransforms') or []
             if not transformlist:
                 raise ValueError("No transforms available for template-to-subject mapping")
-                
+
             warped_labels = ants.apply_transforms(
                 fixed=thickness_results['BrainSegmentationN4'],
                 moving=template_labels,
                 transformlist=transformlist,
-                interpolator='nearestNeighbor',
-                whichtoinvert=whichtoinvert
+                interpolator='nearestNeighbor'
             )
             
             return {
@@ -542,31 +542,46 @@ class ANTsSegmentation:
         label_df.to_csv(labelstats_file, index=False)
 
         # Generate antsbrainvols.csv
+        #
+        # Only BVOL is reported. This used to also emit CSFVOL/GMVOL/WMVOL from
+        # probabilityimages[0], [1] and [2], on the assumption that those are
+        # CSF/GM/WM tissue posteriors. They are not, in either method:
+        #   - 'fusion' returns one posterior per *anatomical label* (103 of them
+        #     on ABIDE sub-0051456), so [0..2] were simply the first three DKT
+        #     labels wearing tissue names -- delivered CSFVOL/GMVOL/WMVOL of
+        #     4105/5426/10391 mm^3 against ~1.5e5/6.0e5/5.0e5 expected.
+        #   - 'quick' returns no 'probabilityimages' key at all, so the branch
+        #     never ran there.
+        # That is every code path, so the columns were wrong whenever present.
+        # Deriving real tissue volumes means grouping DKT labels into tissue
+        # classes (or running Atropos for posteriors), which is a separate piece
+        # of work; reporting nothing beats reporting numbers off by ~100x.
         brain_vol_data = {"BVOL": brain_volume}
-        tissue_volumes = {}
-
-        probability_images = segmentation.get('probabilityimages') or []
-        if len(probability_images) >= 3:
-            csf_vol = float(np.sum(probability_images[0].numpy() > self.prob_threshold) * voxel_volume)
-            gm_vol = float(np.sum(probability_images[1].numpy() > self.prob_threshold) * voxel_volume)
-            wm_vol = float(np.sum(probability_images[2].numpy() > self.prob_threshold) * voxel_volume)
-
-            tissue_volumes = {
-                "CSFVOL": csf_vol,
-                "GMVOL": gm_vol,
-                "WMVOL": wm_vol,
-            }
-            brain_vol_data.update(tissue_volumes)
 
         brainvols_file = stats_dir / f"{seg_base}_antsbrainvols.csv"
         pd.DataFrame([brain_vol_data]).to_csv(brainvols_file, index=False)
 
-        # Save probability maps if available
-        if 'probabilityimages' in segmentation:
-            for idx, prob_img in enumerate(segmentation['probabilityimages']):
-                prob_filename = f"sub-{bids_subject}{session_part}_space-orig_label-{idx+1}_probseg.nii.gz"
-                prob_path = anat_dir / prob_filename
-                ants.image_write(prob_img, str(prob_path))
+        # Save probability maps if available.
+        # Name each map by the anatomical label it belongs to, taken from
+        # segmentation_numbers, rather than by its position in the list. The
+        # index-based names (label-1 ... label-104) did not correspond to any
+        # label in the segmentation, so the maps could not be matched to the
+        # structures they describe.
+        prob_images = segmentation.get('probabilityimages') or []
+        seg_numbers = segmentation.get('segmentation_numbers') or []
+        if prob_images and len(seg_numbers) != len(prob_images):
+            self.logger.warning(
+                f"{len(prob_images)} probability maps but {len(seg_numbers)} label "
+                "numbers; falling back to index-based probseg names"
+            )
+        for idx, prob_img in enumerate(prob_images):
+            if len(seg_numbers) == len(prob_images):
+                label_id = int(seg_numbers[idx])
+            else:
+                label_id = idx + 1
+            prob_filename = f"sub-{bids_subject}{session_part}_space-orig_label-{label_id}_probseg.nii.gz"
+            prob_path = anat_dir / prob_filename
+            ants.image_write(prob_img, str(prob_path))
         
         self.logger.info(f"Saved segmentation results for subject {bids_subject}")
         volume_info = {
@@ -576,9 +591,6 @@ class ANTsSegmentation:
             'segmentation': str(label_path),
             'label_volumes': {int(lbl): float(vol) for lbl, vol in zip(label_values, label_volumes_mm3)},
         }
-
-        if tissue_volumes:
-            volume_info['tissue_volumes'] = tissue_volumes
 
         return volume_info
 
@@ -694,9 +706,8 @@ class ANTsSegmentation:
             # Log volume information
             if volumes:
                 self.logger.info("Segmentation volumes:")
-                if 'tissue_volumes' in volumes:
-                    for tissue, volume in volumes['tissue_volumes'].items():
-                        self.logger.info(f"  {tissue}: {volume:.2f} mm³")
+                if 'brain_volume' in volumes:
+                    self.logger.info(f"  BVOL: {volumes['brain_volume']:.2f} mm³")
                 if 'label_volumes' in volumes:
                     for label, volume in volumes['label_volumes'].items():
                         self.logger.info(f"  Label {label}: {volume:.2f} mm³")
@@ -732,16 +743,29 @@ class ANTsSegmentation:
             spline_param=200
         )
         
-        # Initial brain extraction using registration template and probability mask
+        # Initial brain extraction, antsBrainExtraction.sh semantics: register
+        # the whole-head subject to the whole-head T_template0 with the
+        # ExtractionMask restricting the metric region (that is what that
+        # 5.9 L mask is for), then pull the brain probability mask into
+        # subject space. The previous init registered whole-head onto the
+        # brain-only BrainCerebellum template, rigid-only and unmasked --
+        # content-mismatched and without scaling, which turned out bistable
+        # across CPU types: identical code and input gave a 1.70 L final mask
+        # on node1406, 2.84 L on node2906 and 3.25 L on node2000. Affine (so
+        # head size lands in the transform, not the mask) plus matched content
+        # plus the metric mask keeps every node in the same basin.
         self.logger.info("Performing initial brain extraction")
+        head_template = ants.image_read(str(self.template_dir / 'T_template0.nii.gz'))
         reg_template = ants.image_read(str(self.template_dir / 'T_template0_BrainCerebellum.nii.gz'))
         prob_mask = ants.image_read(str(self.template_dir / 'T_template0_BrainCerebellumProbabilityMask.nii.gz'))
-        
-        # Initial rigid registration
+        extraction_mask = ants.image_read(str(self.template_dir / 'T_template0_BrainCerebellumExtractionMask.nii.gz'))
+
+        # Initial affine registration, metric restricted to the head region
         init_reg = ants.registration(
-            fixed=reg_template,
+            fixed=head_template,
             moving=n4_image,
-            type_of_transform='Rigid',
+            type_of_transform='Affine',
+            mask=extraction_mask,
             aff_metric='mattes',
             aff_sampling=32,
             aff_random_sampling_rate=0.2,
@@ -749,13 +773,13 @@ class ANTsSegmentation:
             verbose=True,
             random_seed=1
         )
-        
+
         # Transform probability mask to subject space
         init_mask = ants.apply_transforms(
             fixed=n4_image,
             moving=prob_mask,
             transformlist=init_reg['invtransforms'],
-            interpolator='lanczosWindowedSinc'
+            interpolator='linear'
         )
         
         # Create brain mask and extract brain
@@ -764,10 +788,15 @@ class ANTsSegmentation:
         brain_mask = ants.iMath(brain_mask, "GetLargestComponent")
         brain_image = n4_image * brain_mask
         
-        # Register to brain template
+        # Register to the brain-only template. brain_image is skull-stripped at
+        # this point, so the fixed image must be skull-stripped too
+        # (T_template0_BrainCerebellum, already loaded above as reg_template).
+        # Registering it onto the whole-head T_template0 biased the affine
+        # toward scaling the brain up to the head outline, inflating every
+        # template-space image warped back with these transforms.
         self.logger.info("Registering to template")
-        brain_template = ants.image_read(str(self.template_dir / 'T_template0.nii.gz'))
-        
+        brain_template = reg_template
+
         try:
             # First try affine registration
             affine_reg = ants.registration(
@@ -794,25 +823,44 @@ class ANTsSegmentation:
                 random_seed=1
             )
             
-            transforms = [
-                reg['fwdtransforms'][0],  # Affine transform
-                reg['fwdtransforms'][1]   # Warp transform
-            ]
-            
+            # These registrations are subject -> template (fixed=brain_template,
+            # moving=brain_image), so fwdtransforms maps subject -> template.
+            # Everything downstream needs the opposite direction -- pulling
+            # template-space images (the brain probability mask, and the label atlas in
+            # the 'quick' method) into subject space -- which is invtransforms:
+            # "invtransforms: Transforms to move from fixed to moving image".
+            #
+            # Using fwdtransforms here yielded a mask covering the entire FOV, so
+            # joint label fusion labelled air, skull and neck: 100% of voxels
+            # labelled, no background at all, label 4 alone taking 69.6% of the
+            # image, and an 11.5 L "brain volume" on ABIDE sub-0051456. The
+            # initial-mask call above was always correct; only this one was not.
+            transforms = list(reg['invtransforms'])
+
         except Exception as e:
             self.logger.warning(f"SyN registration failed: {str(e)}")
             self.logger.info("Using affine registration only")
-            transforms = [affine_reg['fwdtransforms'][0]]
-        
-        # Apply final transforms to extraction mask
-        ext_mask = ants.image_read(str(self.template_dir / 'T_template0_BrainCerebellumExtractionMask.nii.gz'))
+            transforms = list(affine_reg['invtransforms'])
+
+        # Build the final brain mask from the warped *ProbabilityMask*, exactly
+        # as in the initial-extraction step above but through the refined
+        # affine+SyN transforms. NOT the ExtractionMask: in the OASIS-30 kit
+        # that file is the generous registration-scope mask (5.9 L in template
+        # space, antsBrainExtraction.sh's -f argument), not a brain mask --
+        # using it here delivered a 5.6 L "brain" on ABIDE sub-0051456 even
+        # with the transform direction fixed. The probability mask thresholded
+        # at 0.5 is 1.34 L, matching the brain-only template.
+        # whichtoinvert is deliberately left unset: apply_transforms auto-detects
+        # the (True, False) pattern for the [affine.mat, InverseWarp] shape that
+        # invtransforms returns. Hand-maintaining that bookkeeping per element is
+        # what went wrong before, so it is not reintroduced here.
         final_mask = ants.apply_transforms(
             fixed=n4_image,
-            moving=ext_mask,
+            moving=prob_mask,
             transformlist=transforms,
-            interpolator='nearestNeighbor'
+            interpolator='linear'
         )
-        
+
         # Ensure final mask is binary
         final_mask = ants.threshold_image(final_mask, 0.5, 1.0)
         final_mask = ants.iMath(final_mask, "FillHoles")
@@ -824,17 +872,9 @@ class ANTsSegmentation:
             'BrainExtractionMask': final_mask
         }
         
-        # Handle transforms based on what's available
-        if len(transforms) > 1:
-            results['TemplateToSubject1GenericAffine'] = transforms[0]
-            results['TemplateToSubject0Warp'] = transforms[1]
-        elif len(transforms) == 1:
-            # Only affine available
-            results['TemplateToSubject1GenericAffine'] = transforms[0]
-            results['TemplateToSubject0Warp'] = None
-        else:
-            # No transforms (shouldn't happen but handle gracefully)
-            results['TemplateToSubject1GenericAffine'] = None
-            results['TemplateToSubject0Warp'] = None
-            
+        # Template -> subject transforms, kept as the ordered list ANTsPy
+        # returned. Consumers pass it to apply_transforms verbatim rather than
+        # rebuilding it element by element.
+        results['TemplateToSubjectTransforms'] = transforms
+
         return results
